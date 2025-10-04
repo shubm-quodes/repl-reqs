@@ -276,19 +276,20 @@ func (h *CmdHandler) HandleAsyncCmd(
 	cmd AsyncCmd,
 	tokens []string,
 ) (context.Context, error) {
+	task := NewTaskStatus("initiated")
 	h.spinner.Start()
-	// defer s.Stop()
+  h.taskUpdates <- *task
 
 	taskCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	task := NewTaskStatus("initiated")
 	h.currFgTaskId = task.id
 	cmd.SetTaskStatus(task)
-
 	go func() {
+    cmdCtx := newCmdCtx(taskCtx, tokens)
+    cmdCtx.ExpandedTokens = tokens
 		defer h.spinner.Stop()
-		cmd.ExecuteAsync(newCmdCtx(taskCtx, tokens))
+		cmd.ExecuteAsync(cmdCtx)
 	}()
 
 	return taskCtx, nil
@@ -330,7 +331,7 @@ func (h *CmdHandler) listenForTaskUpdates() {
 			task.output = statusUpdate.output
 
 			if task.done && h.currFgTaskId == task.id {
-				fmt.Println("Task completed\n", task.output)
+				fmt.Println("✅ Task completed\n", task.output)
 				h.rl.Refresh()
 			}
 
@@ -349,9 +350,9 @@ func (h *CmdHandler) listenForTaskUpdates() {
 
 func (h *CmdHandler) updateSpinnerMsg(ts *taskStatus) {
 	if ts.error != nil {
-		h.spinner.Suffix = ts.error.Error()
+		h.spinner.Suffix = " " + ts.error.Error()
 	} else {
-		h.spinner.Suffix = ts.message
+		h.spinner.Suffix = " " + ts.message
 	}
 }
 
