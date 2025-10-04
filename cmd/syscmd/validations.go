@@ -1,7 +1,5 @@
 package syscmd
 
-import u "github.com/nodding-noddy/repl-reqs/util"
-
 type Validation interface {
 	validate(value string) (any, error)
 	InitializeParams(map[string]any) Validation
@@ -11,7 +9,7 @@ type NumValidateable interface {
 }
 
 type GenericValidations struct {
-	Required bool
+	Required *bool
 }
 
 type IntValidations struct {
@@ -42,7 +40,6 @@ type ArrValidation []Validation
 type ObjValidation map[string]Validation
 
 func (iv *IntValidations) InitializeParams(params map[string]interface{}) Validation {
-	iv.Required = u.Is("required", params)
 	if v, ok := params["minVal"].(float64); ok {
 		minVal := int(v)
 		iv.MinVal = &minVal
@@ -55,7 +52,6 @@ func (iv *IntValidations) InitializeParams(params map[string]interface{}) Valida
 }
 
 func (fv *FloatValidations) InitializeParams(params map[string]interface{}) Validation {
-	fv.Required = u.Is("required", params)
 	if v, ok := params["minVal"].(float64); ok {
 		fv.MinVal = &v
 	}
@@ -66,7 +62,6 @@ func (fv *FloatValidations) InitializeParams(params map[string]interface{}) Vali
 }
 
 func (sv *StrValidations) InitializeParams(params map[string]interface{}) Validation {
-	sv.Required = u.Is("required", params)
 	if v, ok := params["minLength"].(float64); ok {
 		i := int(v)
 		sv.MinLength = &i

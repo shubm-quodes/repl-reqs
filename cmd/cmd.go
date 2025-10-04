@@ -3,18 +3,21 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
-	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/nodding-noddy/repl-reqs/util"
 )
 
 var (
-	cmdRegistry         = make(CmdRegistry)
 	keyListenerRegistry = make(KeyListenerRegistry)
 )
+
+type CmdContext struct {
+	Ctx context.Context
+	RawTokens []string
+	ExpandedTokens []string
+}
 
 type Cmd interface {
 	Name() string
@@ -26,25 +29,26 @@ type Cmd interface {
 	AddSubCmd(cmd Cmd) Cmd
 	WalkTillLastSubCmd(tokens [][]rune) (remainingTkns [][]rune, c Cmd)
 	filterSuggestions(partial string, offset int) [][]rune
-	Execute(cmdContext context.Context, tokens []string) (context.Context, error)
+	Execute(*CmdContext) (context.Context, error)
+	SetTaskStatus(*taskStatus)
+	GetTaskStatus() *taskStatus
 	cleanup()
 }
 
 type BaseCmd struct {
-	Name_   string
-	Desc_   string
-	SubCmds map[string]Cmd
-	handler *CmdHandler
+	Name_      string
+	Desc_      string
+	SubCmds    map[string]Cmd
+	handler    *CmdHandler
+	taskStatus *taskStatus
 }
 
 type AsyncCmd interface {
 	Cmd
-	ExecuteAsync(cmdContext context.Context, tokens []string)
+	ExecuteAsync(*CmdContext)
 }
 
 type SubCmd map[string]Cmd
-
-type CmdRegistry map[string]Cmd
 
 type KeyListener struct {
 	action  string
@@ -53,32 +57,27 @@ type KeyListener struct {
 
 type KeyListenerRegistry map[rune]*KeyListener
 
-type taskStatus struct {
-	id        string
-	ctx       context.Context
-	message   string
-	error     error
-	done      bool
-	result    any
-	createdAt time.Time
-}
+// type TaskStatus struct {
+// 	Id        string
+// 	Ctx       context.Context
+// 	Message   string
+// 	Error     error
+// 	Done      bool
+// 	Result    any
+// 	CreatedAt time.Time
+// }
 
-type TaskStatus interface {
-	GetID() string
-	GetMessage() string
-	GetErr() error
-	GetResult() any
-
-	SetID() string
-	SetMessage() string
-	SetErr() error
-	SetResult() any
-}
-
-func GetCmdByName(name string) (Cmd, bool) {
-	cmd, exists := cmdRegistry[name]
-	return cmd, exists
-}
+// type TaskStatus interface {
+// 	GetID() string
+// 	GetMessage() string
+// 	GetErr() error
+// 	GetResult() any
+//
+// 	SetID() string
+// 	SetMessage() string
+// 	SetErr() error
+// 	SetResult() any
+// }
 
 func (c *BaseCmd) Name() string {
 	return c.Name_
@@ -110,6 +109,14 @@ func (b *BaseCmd) GetSubCmdList() []string {
 		subCmds = append(subCmds, s)
 	}
 	return subCmds
+}
+
+func (b *BaseCmd) GetTaskStatus() *taskStatus {
+	return b.taskStatus
+}
+
+func (b *BaseCmd) SetTaskStatus(t *taskStatus) {
+	b.taskStatus = t
 }
 
 func Walk(cmd Cmd, tokens [][]rune) (remainingTkns [][]rune, finalCmd Cmd) {
@@ -184,51 +191,239 @@ func (c *BaseCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 }
 
 // Just a default Execute method if no args or an invalid sub cmd gets provided
-func (c *BaseCmd) Execute(ctx context.Context, tokens []string) (context.Context, error) {
+func (c *BaseCmd) Execute(cmdCtx *CmdContext) (context.Context, error) {
 	subCmds := c.GetSubCmdList()
 	formattedList := util.GetTruncatedStr(strings.Join(subCmds, ", "))
 	fmt.Printf("available sub commands for %s are %v\n", c.Name_, formattedList)
-	return ctx, nil
+	return cmdCtx.Ctx, nil
 }
 
 func (c *BaseCmd) cleanup() {}
 
-func RegisterSysCmd(cmd Cmd) {
-	name := strings.Trim(cmd.Name(), " ") // IKR.. :P
-	if name == "" {
-		typeName := reflect.TypeOf(cmd).Name()
-		panic(
-			fmt.Sprintf(
-				"Failed to register system command '%s':"+
-					"name cannot be empty!", typeName,
-			),
-		)
+// state is a struct to hold the current parsing state for token recombination.
+type state struct {
+	recombinedTokens []string
+	inQuote          bool
+	quoteChar        byte
+	currentToken     string
+}
+
+// parseParamsWithConditionalQuotes orchestrates the parameter parsing process.
+func ParseCmdKeyValPairs(tokens []string) (map[string]string, error) {
+	// Step 1: Recombine tokens that belong to a single quoted value
+	recombinedTokens, err := recombineQuotedTokens(tokens)
+	if err != nil {
+		return nil, err
 	}
-	if !strings.HasPrefix(name, "$") {
-		panic(
-			fmt.Sprintf(
-				"Failed to register system command with name '%s':"+
-					"system command names should be prefixed with a '$' sign", name,
-			),
-		)
+
+	// Step 2: Parse the recombined tokens into a map
+	return parseKeyValues(recombinedTokens)
+}
+
+// --- Token Recombination Logic (Complex State Machine) ---
+
+// recombineQuotedTokens handles the logic of stitching together tokens that were
+// split because a quoted value contained spaces.
+func recombineQuotedTokens(tokens []string) ([]string, error) {
+	s := state{
+		recombinedTokens: make([]string, 0),
+		inQuote:          false,
+		quoteChar:        byte(0),
+		currentToken:     "",
 	}
-	cmdRegistry[name] = cmd
-}
 
-func RegisterCmd(cmd AsyncCmd) {
-	cmdRegistry[cmd.Name()] = cmd
-}
+	for _, token := range tokens {
+		var err error
+		if s.inQuote {
+			err = s.handleInsideQuoteToken(token)
+		} else {
+			err = s.handleOutsideQuoteToken(token)
+		}
 
-func InjectCmdHandler(handler *CmdHandler) {
-	injectHandlerInternal(cmdRegistry, handler)
-}
-
-func injectHandlerInternal(reg CmdRegistry, handler *CmdHandler) {
-	for _, cmd := range reg {
-		cmd.setCmdHandler(handler)
-		subCmds := cmd.GetSubCmds()
-		if len(subCmds) > 0 {
-			injectHandlerInternal(CmdRegistry(subCmds), handler)
+		if err != nil {
+			return nil, err
 		}
 	}
+
+	// Handle the case where the input ended with an unclosed quote
+	if s.inQuote {
+		return nil, fmt.Errorf("unclosed quote starting at: %s", s.currentToken)
+	}
+
+	return s.recombinedTokens, nil
 }
+
+// handleInsideQuoteToken processes a token when the parser is currently inside a quote.
+func (s *state) handleInsideQuoteToken(token string) error {
+	// If inside a quote, append the token with a space
+	s.currentToken += " " + token
+
+	// Check if this token ends the quote
+	if len(token) > 0 && token[len(token)-1] == s.quoteChar {
+		s.inQuote = false
+		s.recombinedTokens = append(s.recombinedTokens, s.currentToken)
+		s.currentToken = ""
+	}
+	return nil
+}
+
+// handleOutsideQuoteToken processes a token when the parser is NOT inside a quote.
+func (s *state) handleOutsideQuoteToken(token string) error {
+	// Check if this token starts a quoted parameter (key='value)
+	if strings.ContainsRune(token, '=') {
+		parts := strings.SplitN(token, "=", 2)
+		value := parts[1]
+
+		if len(value) > 0 {
+			firstChar := value[0]
+			// Check if it starts with a quote
+			if firstChar == '\'' || firstChar == '"' {
+				s.inQuote = true
+				s.quoteChar = firstChar
+				s.currentToken = token
+
+				// Check if the quote is also closed in this same token
+				if len(value) > 1 && value[len(value)-1] == s.quoteChar {
+					s.inQuote = false
+					s.recombinedTokens = append(s.recombinedTokens, s.currentToken)
+					s.currentToken = ""
+				}
+				return nil // Handled the token, move to the next one
+			}
+		}
+	}
+
+	// If no quote started, or it was a non-quoted parameter, treat it as a complete token
+	s.recombinedTokens = append(s.recombinedTokens, token)
+	return nil
+}
+
+// --- Key-Value Parsing Logic ---
+
+// parseKeyValues takes a slice of 'key=value' strings and converts them to a map,
+// stripping quotes from values as needed.
+func parseKeyValues(recombinedTokens []string) (map[string]string, error) {
+	parsedParams := make(map[string]string)
+
+	for _, token := range recombinedTokens {
+		parts := strings.SplitN(token, "=", 2)
+		if len(parts) != 2 {
+			// Skip tokens that are not key=value pairs
+			continue
+		}
+
+		key := parts[0]
+		value := parts[1]
+
+		// Strip quotes from the value
+		value = stripQuotes(value)
+
+		parsedParams[key] = value
+	}
+
+	return parsedParams, nil
+}
+
+// stripQuotes removes surrounding single or double quotes from a value string
+// if they exist and match.
+func stripQuotes(value string) string {
+	if len(value) < 2 {
+		return value
+	}
+
+	firstChar := value[0]
+	lastChar := value[len(value)-1]
+
+	// Check if the value is symmetrically quoted
+	if (firstChar == '\'' && lastChar == '\'') || (firstChar == '"' && lastChar == '"') {
+		// Strip the quotes
+		return value[1 : len(value)-1]
+	}
+
+	return value
+}
+
+// func parseParamsWithConditionalQuotes(tokens []string) (map[string]string, error) {
+// 	parsedParams := make(map[string]string)
+//
+// 	// Step 1: Recombine tokens that belong to a single quoted value
+// 	var recombinedTokens []string
+// 	inQuote := false
+// 	quoteChar := byte(0)
+// 	currentToken := ""
+//
+// 	for _, token := range tokens {
+// 		if inQuote {
+// 			// If inside a quote, append the token with a space and check for closing quote
+// 			currentToken += " " + token
+//
+// 			// Check if this token ends the quote
+// 			if len(token) > 0 && token[len(token)-1] == quoteChar {
+// 				inQuote = false
+// 				recombinedTokens = append(recombinedTokens, currentToken)
+// 				currentToken = ""
+// 			}
+// 		} else {
+// 			// Not in a quote yet, check if this token starts one (key='value)
+// 			if strings.ContainsRune(token, '=') {
+// 				parts := strings.SplitN(token, "=", 2)
+// 				value := parts[1]
+//
+// 				if len(value) > 0 {
+// 					firstChar := value[0]
+// 					// Check if it starts with a quote
+// 					if firstChar == '\'' || firstChar == '"' {
+// 						inQuote = true
+// 						quoteChar = firstChar
+// 						currentToken = token
+//
+// 						// Check if the quote is also closed in this same token
+// 						if len(value) > 1 && value[len(value)-1] == quoteChar {
+// 							inQuote = false
+// 							recombinedTokens = append(recombinedTokens, currentToken)
+// 							currentToken = ""
+// 						}
+// 						continue // Move to the next token
+// 					}
+// 				}
+// 			}
+//
+// 			// If no quote started, or it was a non-quoted parameter, treat it as a complete token
+// 			recombinedTokens = append(recombinedTokens, token)
+// 		}
+// 	}
+//
+// 	// Handle the case where the input ended with an unclosed quote
+// 	if inQuote {
+// 		return nil, fmt.Errorf("unclosed quote starting at: %s", currentToken)
+// 	}
+//
+// 	// Step 2: Parse the recombined tokens
+// 	for _, token := range recombinedTokens {
+// 		parts := strings.SplitN(token, "=", 2)
+// 		if len(parts) != 2 {
+// 			// Skip tokens that are not key=value pairs (e.g., plain command arguments)
+// 			continue
+// 		}
+//
+// 		key := parts[0]
+// 		value := parts[1]
+//
+// 		// Step 3: Remove surrounding quotes if they exist (based on your rule)
+// 		if len(value) > 1 {
+// 			firstChar := value[0]
+// 			lastChar := value[len(value)-1]
+//
+// 			// If the value contains a space AND starts/ends with a quote, strip them.
+// 			// The recombination logic already ensures it's a full value string.
+// 			if (firstChar == '\'' && lastChar == '\'') || (firstChar == '"' && lastChar == '"') {
+// 				// Strip the quotes
+// 				value = value[1 : len(value)-1]
+// 			}
+// 		}
+//
+// 		parsedParams[key] = value
+// 	}
+//
+// 	return parsedParams, nil
+// }

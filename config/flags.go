@@ -29,7 +29,7 @@ func (f *Flags) Process() {
 }
 
 // Initialize flags alongside their default values
-func InitFlags() (f *Flags) {
+func InitializeFlags() (f *Flags) {
 	f = &Flags{}
 	flag.BoolVar(&f.enableDebugging, "enable-debugging", false, "Enable debugging logs")
 	flag.BoolVar(&f.showVersion, "v", false, "Show version information")

@@ -5,20 +5,25 @@ import (
 	"os"
 
 	"github.com/nodding-noddy/repl-reqs/cmd"
-	_ "github.com/nodding-noddy/repl-reqs/cmd/syscmd"
+	"github.com/nodding-noddy/repl-reqs/cmd/syscmd"
 	"github.com/nodding-noddy/repl-reqs/config"
 )
 
 func main() {
-	flags := config.InitFlags()
+	flags := config.InitializeFlags()
 	flags.Process()
-	cfg := config.Initialize(flags)
 
-	if cmdHandler, err := cmd.NewCmdHandler(cfg, config.GetShellCfg(cfg)); err != nil {
+	cfg := config.Initialize(flags)
+	reg := cmd.NewCmdRegistry()
+
+	syscmd.RegisterCmds(reg)
+
+	if cmdHandler, err := cmd.NewCmdHandler(cfg, config.GetShellCfg(cfg), reg); err != nil {
 		fmt.Println("failed to initialize command handler", err)
 		os.Exit(1)
 	} else {
-		cmd.InjectCmdHandler(cmdHandler)
+		syscmd.ParseRawReqs(cfg.RawCfg, cmdHandler)
+		cmdHandler.InjectIntoReg()
 		cmdHandler.Repl(cfg.GetPrompt(), cfg.GetPromptMascot())
 	}
 }
