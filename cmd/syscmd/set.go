@@ -79,25 +79,8 @@ type Vars map[string]interface{}
 
 var variables = make(Vars)
 
-func init() {
-	s := &setCmd{&cmd.BaseCmd{Name_: CmdSetName}}
-	s.AddSubCmd(&CmdEnv{&cmd.BaseCmd{Name_: CmdEnvName}})
-	s.AddSubCmd(&CmdVar{&cmd.BaseCmd{Name_: CmdVarName}})
-	s.AddSubCmd(&CmdURL{&cmd.BaseCmd{Name_: CmdURLName}})
-	s.AddSubCmd(&CmdHeader{&cmd.BaseCmd{Name_: CmdHeaderName}})
-	s.AddSubCmd(&CmdMultiHeaders{BaseCmd: &cmd.BaseCmd{Name_: CmdMultiHeadersName}})
-	s.AddSubCmd(&CmdHTTPVerb{&cmd.BaseCmd{Name_: CmdHTTPVerbName}})
-	s.AddSubCmd(&CmdPayload{&cmd.BaseCmd{Name_: CmdPayloadName}})
-	s.AddSubCmd(&CmdPrompt{&cmd.BaseCmd{Name_: CmdPromptName}})
-	s.AddSubCmd(&CmdMascot{&cmd.BaseCmd{Name_: CmdMascotName}})
-
-	cmd.RegisterSysCmd(s)
-}
-
-func (cmh *CmdMultiHeaders) Execute(
-	ctx context.Context,
-	tokens []string,
-) (context.Context, error) {
+func (cmh *CmdMultiHeaders) Execute(cmdContext *cmd.CmdContext) (context.Context, error) {
+	ctx := cmdContext.Ctx
 	handler := cmh.GetCmdHandler()
 
 	if handler.GetCurrentCmdMode() != cmh {
@@ -122,10 +105,8 @@ func (cmh *CmdMultiHeaders) activateMultiHeaderMode() {
 	handler.SetCurrentCmdMode("$multi-headers", cmh)
 }
 
-func (chv *CmdHTTPVerb) Execute(
-	ctx context.Context,
-	tokens []string,
-) (context.Context, error) {
+func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify httpverb")
 	}
@@ -136,7 +117,8 @@ func (chv *CmdHTTPVerb) Execute(
 	return ctx, nil
 }
 
-func (ec *CmdEnv) Execute(ctx context.Context, tokens []string) (context.Context, error) {
+func (ec *CmdEnv) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify environment name")
 	}
@@ -145,12 +127,13 @@ func (ec *CmdEnv) Execute(ctx context.Context, tokens []string) (context.Context
 	mgr := c.GetEnvManager()
 	mgr.SetActiveEnv(env)
 
-  ec.GetCmdHandler().UpdatePromptEnv()
+	ec.GetCmdHandler().UpdatePromptEnv()
 	fmt.Printf(`Environment now set to "%s"`+"\n", env)
 	return ctx, nil
 }
 
-func (vc *CmdVar) Execute(ctx context.Context, tokens []string) (context.Context, error) {
+func (vc *CmdVar) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) < 2 {
 		return ctx, errors.New(
 			"failed to set variable: name & value are required",
@@ -171,10 +154,8 @@ func getVar[T interface{}](name string) (T, bool) {
 	return found, ok
 }
 
-func (pc *CmdPrompt) Execute(
-	ctx context.Context,
-	tokens []string,
-) (context.Context, error) {
+func (pc *CmdPrompt) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify prompt")
 	}
@@ -190,10 +171,8 @@ func (pc *CmdPrompt) Execute(
 	return ctx, nil
 }
 
-func (cm *CmdMascot) Execute(
-	ctx context.Context,
-	tokens []string,
-) (context.Context, error) {
+func (cm *CmdMascot) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify mascot")
 	}

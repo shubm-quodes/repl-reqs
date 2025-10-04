@@ -12,7 +12,7 @@ import (
 )
 
 // Validators
-func (iv *IntValidations) validate(value string) (interface{}, error) {
+func (iv *IntValidations) validate(value string) (any, error) {
 	var (
 		intVal int
 		err    error
@@ -23,7 +23,7 @@ func (iv *IntValidations) validate(value string) (interface{}, error) {
 	return intVal, validateNum(&intVal, iv.MinVal, iv.MaxVal)
 }
 
-func (fv *FloatValidations) validate(value string) (interface{}, error) {
+func (fv *FloatValidations) validate(value string) (any, error) {
 	var (
 		floatVal float64
 		err      error
@@ -34,11 +34,15 @@ func (fv *FloatValidations) validate(value string) (interface{}, error) {
 	return floatVal, validateNum(&floatVal, fv.MinVal, fv.MaxVal)
 }
 
-func (sv *StrValidations) validate(value string) (interface{}, error) {
+func (sv *StrValidations) validate(value string) (any, error) {
 	strLen := len(value)
 	if err := validateNum(&strLen, sv.MinLength, sv.MaxLength); err != nil {
 		return nil, err
 	}
+
+  if sv.regex == nil {
+    return value, nil
+  }
 
 	if matched, err := regexp.MatchString(*sv.regex, value); !matched || err != nil {
 		return nil, fmt.Errorf(
@@ -49,42 +53,42 @@ func (sv *StrValidations) validate(value string) (interface{}, error) {
 	return value, nil
 }
 
-func (arVld *ArrValidation) validate(value string) (interface{}, error) {
+func (arVld *ArrValidation) validate(value string) (any, error) {
 	str := []byte(fmt.Sprintf(`{"arr": %s}`, value)) // Hehehehuhuhu, am I Evil?
-	var arrWrapper map[string]interface{}
+	var arrWrapper map[string]any
 	json.Unmarshal(str, &arrWrapper)
-	return arrWrapper["arr"], arVld.validateArr(arrWrapper["arr"].([]interface{}))
+	return arrWrapper["arr"], arVld.validateArr(arrWrapper["arr"].([]any))
 }
 
-func (objVlds *ObjValidation) validate(value string) (interface{}, error) {
-	var obj map[string]interface{}
+func (objVlds *ObjValidation) validate(value string) (any, error) {
+	var obj map[string]any
 	json.Unmarshal([]byte(value), &obj)
 	return obj, objVlds.validateObj(obj)
 }
 
-func (objVlds *ObjValidation) validateObj(obj map[string]interface{}) error {
+func (objVlds *ObjValidation) validateObj(obj map[string]any) error {
 	for key, vld := range *objVlds {
 		return inferAndVld(vld, obj[key])
 	}
 	return nil
 }
 
-func (arrVlds *ArrValidation) validateArr(arr []interface{}) error {
+func (arrVlds *ArrValidation) validateArr(arr []any) error {
 	for idx, vld := range *arrVlds {
 		return inferAndVld(vld, arr[idx])
 	}
 	return nil
 }
 
-func inferAndVld(vld Validation, value interface{}) error {
+func inferAndVld(vld Validation, value any) error {
 	switch vld := vld.(type) {
 	case *ObjValidation:
-		if v, ok := value.(map[string]interface{}); ok {
+		if v, ok := value.(map[string]any); ok {
 			return vld.validateObj(v)
 		}
 		return errors.New("invalid object type value")
 	case *ArrValidation:
-		if v, ok := value.([]interface{}); ok {
+		if v, ok := value.([]any); ok {
 			return vld.validateArr(v)
 		}
 		return errors.New("invalid value for array type")

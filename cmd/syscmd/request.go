@@ -2,10 +2,11 @@ package syscmd
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -50,6 +51,7 @@ type ReqProps struct {
 }
 
 type ReqCmd struct {
+	mgr *RequestManager
 	*cmd.BaseCmd
 	*ReqProps
 }
@@ -57,13 +59,19 @@ type ReqCmd struct {
 type ReqData struct {
 	queryParams KeyValPair
 	Headers     KeyValPair
-	Payload     map[string]interface{}
+	Payload     map[string]any
 }
 
 type RequestManager struct {
 	Tracker       *RequestTracker
 	Client        *http.Client
 	CommonHeaders http.Header
+}
+
+type CmdParams struct {
+	URL     map[string]string
+	Query   map[string]string
+	Payload map[string]any
 }
 
 var ProccessingReqs = make([]*Request, 1)
@@ -90,8 +98,15 @@ type Request struct {
 
 var commonHeaders = make(KeyValPair)
 
-// MakeRequest sends a request and returns its ID and a completion channel.
-func (rm *RequestManager) MakeRequest(req *http.Request) (string, Done, error) {
+func NewRequestManager(tracker *RequestTracker, commonHeaders http.Header) *RequestManager {
+	return &RequestManager{
+		Tracker:       tracker,
+		Client:        &http.Client{},
+		CommonHeaders: commonHeaders,
+	}
+}
+
+func (rm *RequestManager) MakeRequest(req *http.Request) (string, <-chan Update, error) {
 	reqID := uuid.New().String()
 	done := make(Done)
 
@@ -105,39 +120,34 @@ func (rm *RequestManager) MakeRequest(req *http.Request) (string, Done, error) {
 	}
 
 	rm.Tracker.AddRequest(trackerReq)
+	update := Update{
+		reqId: reqID,
+	}
 
+	updateChan := make(chan Update)
 	go func(rm *RequestManager, id string, r *http.Request) {
-		// Use a defer statement to ensure close(done) is always called
 		defer close(done)
 
 		start := time.Now()
 		resp, err := rm.Client.Do(r)
 		if err != nil {
-			trackerReq.Status = StatusError // Update status on error
+			trackerReq.Status = StatusError
 			return
 		}
-		defer resp.Body.Close()
 
 		requestTime := time.Since(start)
 
-		// Create the update and send it to the tracker's channel
-		update := Update{
-			reqId: id,
-			resp:  resp,
-		}
+		update.resp = resp
 		rm.Tracker.updates <- update
+		updateChan <- update
 
-		// Set the request time after the update is sent (optional, can be done in the update itself)
 		trackerReq.RequestTime = requestTime
-
-		log.Info("Worker completed request with ID: %s", id)
-
 	}(rm, reqID, req)
 
-	return reqID, done, nil
+	return reqID, updateChan, nil
 }
 
-func ParseRawReqCfg(rawCfg config.RawCfg) error {
+func ParseRawReqs(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
 	util.CopyMap(commonHeaders, rawCfg.Commons.Headers)
 	for _, req := range rawCfg.RawRequests {
 		var rawProps struct {
@@ -153,10 +163,10 @@ func ParseRawReqCfg(rawCfg config.RawCfg) error {
 			return err
 		}
 		reqCmd := &ReqCmd{
-			&cmd.BaseCmd{
+			BaseCmd: &cmd.BaseCmd{
 				Name_: "", //IMP: Since there could be multiple segments.
 			},
-			&ReqProps{
+			ReqProps: &ReqProps{
 				HttpMethod: rawProps.HttpMethod,
 				Url:        rawProps.Url,
 				Headers:    rawProps.Headers,
@@ -167,7 +177,7 @@ func ParseRawReqCfg(rawCfg config.RawCfg) error {
 			rawProps.RawQueryParams,
 			rawProps.RawPayload,
 		)
-		reqCmd.register(rawProps.Cmd)
+		reqCmd.register(rawProps.Cmd, hdlr)
 	}
 	return nil
 }
@@ -181,34 +191,52 @@ func isValidHttpVerb(verb HTTPMethod) bool {
 	}
 }
 
-func (r *ReqCmd) register(cmdWithSubCmds string) {
+func (r *ReqCmd) register(cmdWithSubCmds string, hdlr *cmd.CmdHandler) {
+	if strings.Trim(cmdWithSubCmds, " ") == "" {
+		panic("cannot register request cmd without a command")
+	}
+
 	var command cmd.AsyncCmd
 	segments := strings.Fields(cmdWithSubCmds)
 	rootCmd := segments[0]
+	cmdRegistry := hdlr.GetCmdRegistry()
+	rMgr := NewRequestManager(NewRequestTracker(), nil)
+	r.mgr = rMgr
 
-	if existingCmd, exists := cmd.GetCmdByName(rootCmd); exists {
+	if len(segments) == 1 {
+		r.Name_ = rootCmd
+		cmdRegistry.RegisterCmd(r)
+	}
+
+	if existingCmd, exists := cmdRegistry.GetCmdByName(rootCmd); exists {
 		if existingAsyncCmd, ok := existingCmd.(cmd.AsyncCmd); ok {
 			command = existingAsyncCmd
 		} else {
 			panic(fmt.Sprintf("another non async command already registered with name '%s'", rootCmd))
 		}
 	} else {
-		command = &ReqCmd{BaseCmd: &cmd.BaseCmd{
-			Name_: rootCmd,
-		}}
-		cmd.RegisterCmd(command)
+		command = &ReqCmd{
+			BaseCmd: &cmd.BaseCmd{
+				Name_: rootCmd,
+			},
+			mgr: rMgr,
+		}
+		cmdRegistry.RegisterCmd(command)
 	}
 
-	remainingTkns, subCmd := command.WalkTillLastSubCmd(util.StrArrToRune(segments[1:]))
+	segments = segments[1:]
+	remainingTkns, subCmd := command.WalkTillLastSubCmd(util.StrArrToRune(segments))
 	for i, token := range remainingTkns {
 		isLast := i == len(segments)-1
 		if isLast {
+			r.Name_ = string(token)
 			subCmd.AddSubCmd(r)
 		} else {
 			subCmd = subCmd.AddSubCmd(&ReqCmd{
 				BaseCmd: &cmd.BaseCmd{
 					Name_: string(token),
 				},
+				mgr: rMgr,
 			})
 		}
 	}
@@ -222,30 +250,205 @@ func (rc *ReqCmd) initializeVlds(
 	rc.Payload.initialize(rawPayload)
 }
 
-func (rc *ReqCmd) ExecuteAsync(
-	ctx context.Context,
-	tokens []string,
-) {
-  // u := rc.GetCmdHandler().GetUpdateChan()
-  // t := cmd.TaskStatus{
-  //   Message: "Working on it..",
-  // }
-  // u <- t
-  // go func() {
-  //   defer close(u)
-  //
-  //   for i := range 5 {
-  //     time.Sleep(2*time.Second)
-  //     t.Message = fmt.Sprintf("step '%d' done..", i+1)
-  //     u <- t
-  //     if i == 3 {
-  //       t.Message = "I failed mannnn"
-  //       t.Error = errors.New("Shit")
-  //       t.Done = true
-  //       u <- t
-  //     }
-  //   }
-  // }()
+func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
+	parsedParams, err := cmd.ParseCmdKeyValPairs(tokens)
+	if err != nil {
+		return nil, err
+	}
+
+	cmdParams := &CmdParams{
+		URL:     make(map[string]string),
+		Query:   make(map[string]string),
+		Payload: make(map[string]any),
+	}
+
+	processedKeys := make(map[string]bool)
+
+	validate := func(key string, value string, schema map[string]Validation, destMap any) error {
+		if valSchema, ok := schema[key]; ok {
+			validatedValue, err := valSchema.validate(value)
+			if err != nil {
+				return fmt.Errorf("validation failed for parameter '%s': %w", key, err)
+			}
+			switch m := destMap.(type) {
+			case map[string]string:
+				m[key] = fmt.Sprintf("%v", validatedValue)
+			case map[string]any:
+				m[key] = validatedValue
+			}
+			processedKeys[key] = true
+		}
+		return nil
+	}
+
+	for key, value := range parsedParams {
+		if err := validate(key, value, rc.ReqProps.UrlParams, cmdParams.URL); err != nil {
+			return nil, err
+		}
+		if processedKeys[key] {
+			continue
+		}
+		if err := validate(key, value, rc.ReqProps.QueryParams, cmdParams.Query); err != nil {
+			return nil, err
+		}
+		if processedKeys[key] {
+			continue
+		}
+		if err := validate(key, value, rc.ReqProps.Payload, cmdParams.Payload); err != nil {
+			return nil, err
+		}
+		if processedKeys[key] {
+			continue
+		}
+
+		return nil, fmt.Errorf("unrecognized parameter '%s'", key)
+	}
+
+	return cmdParams, nil
+}
+
+func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
+	finalURL := rc.ReqProps.Url
+	for key, value := range cmdParams.URL {
+		finalURL = strings.Replace(finalURL, ":"+key, value, 1)
+	}
+	u, err := url.Parse(finalURL)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing URL: %w", err)
+	}
+
+	q := u.Query()
+	for key, value := range cmdParams.Query {
+		q.Add(key, value)
+	}
+	u.RawQuery = q.Encode()
+
+	var reqBody io.Reader
+	if len(cmdParams.Payload) > 0 {
+		payloadBytes, err := json.Marshal(cmdParams.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("error marshalling payload: %w", err)
+		}
+		reqBody = bytes.NewReader(payloadBytes)
+	}
+
+	req, err := http.NewRequest(string(rc.HttpMethod), u.String(), reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("error creating HTTP request: %w", err)
+	}
+
+	for key, value := range rc.ReqProps.Headers {
+		req.Header.Set(key, value)
+	}
+
+	return req, nil
+}
+
+func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int) {
+	remainingTkns, lastFoundCmd := cmd.Walk(rc, tokens)
+	if lastFoundCmd == nil && len(remainingTkns) > 0 {
+		lastFoundCmd = rc
+	}
+
+	if lastFoundCmd == nil {
+		return
+	}
+
+	rc, ok := lastFoundCmd.(*ReqCmd)
+	if !ok {
+		return
+	}
+
+	suggestions, offset = rc.BaseCmd.GetSuggestions(remainingTkns)
+	if len(suggestions) > 0 {
+		return
+	}
+
+	var search []rune
+	// if len(remainingTkns) == 0 {
+	// 	search = []rune{}
+	// } else {
+	if len(remainingTkns) > 0 {
+		lastToken := string(remainingTkns[len(remainingTkns)-1])
+		if parts := strings.SplitN(lastToken, "=", 2); len(parts) != 2 {
+			search = []rune(lastToken)
+		}
+	}
+
+	offset = len(search)
+	suggestions = rc.SuggestCmdParams(search)
+	return
+}
+
+func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
+	params := []ValidationSchema{rc.QueryParams, rc.UrlParams, rc.Payload}
+	criteria := &util.MatchCriteria[Validation]{
+		Search:     string(search),
+		SuffixWith: "=",
+	}
+	for _, p := range params {
+		if p == nil {
+			fmt.Println("is nill")
+			continue
+		}
+		criteria.M = p
+		matches := util.GetMatchingMapKeysAsRunes(criteria)
+		if len(matches) > 0 {
+			suggestions = append(suggestions, matches...)
+		}
+	}
+	return
+}
+
+func (rc *ReqCmd) ExecuteAsync(cmdContext *cmd.CmdContext) {
+	tokens := cmdContext.ExpandedTokens
+	hdlr := rc.GetCmdHandler()
+	uChan := hdlr.GetUpdateChan()
+	t := rc.GetTaskStatus()
+
+	cmdParams, err := rc.getCmdParams(tokens)
+	if err != nil {
+		t.SetError(err)
+		uChan <- (*t)
+		return
+	}
+
+	req, err := rc.buildRequest(cmdParams)
+	if err != nil {
+		t.SetError(err)
+		uChan <- (*t)
+		return
+	}
+
+	reqId, updateChan, err := rc.mgr.MakeRequest(req)
+	if err != nil {
+		t.SetError(err)
+		uChan <- (*t)
+		return
+	}
+
+	up := <-updateChan
+	defer up.resp.Body.Close()
+
+	resp := make(map[string]any)
+	respBytes, err := io.ReadAll(up.resp.Body)
+	if err != nil {
+		fmt.Println("failed to read response body")
+		log.Debug("failed to read response body", err.Error())
+		return
+	}
+	err = json.Unmarshal(respBytes, &resp)
+	if err != nil {
+		fmt.Println("failed to process response content", err, string(respBytes))
+		log.Debug("failed to unmarshal response body", err.Error())
+		return
+	}
+	fmt.Printf("successfully completed request with id '%s'\n", reqId)
+
+	t.SetDone(true)
+	t.SetResult(up.resp)
+	t.SetOutput(getFromattedResp(resp) + "\n" + up.resp.Status)
+	uChan <- (*t)
 }
 
 func initialiseSpinner() {
@@ -284,7 +487,7 @@ func highlightText(input string, lexer chroma.Lexer) string {
 	return buf.String()
 }
 
-func outputResp(resp map[string]interface{}) {
+func getFromattedResp(resp map[string]interface{}) string {
 	var jsonBuffer bytes.Buffer
 	enc := json.NewEncoder(&jsonBuffer)
 	enc.SetEscapeHTML(false)
@@ -293,10 +496,7 @@ func outputResp(resp map[string]interface{}) {
 
 	lexer := lexers.Get("json")
 	respStr := jsonBuffer.String()
-	highlightedJSON := highlightText(respStr, lexer)
-
-	fmt.Print(highlightedJSON)
-	// cmd.Shell.Refresh()
+	return highlightText(respStr, lexer)
 }
 
 func (vld *ValidationSchema) initialize(rawVlds json.RawMessage) {

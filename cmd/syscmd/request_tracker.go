@@ -2,10 +2,11 @@ package syscmd
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/nodding-noddy/repl-reqs/log"
 )
 
 type RequestStatus string
@@ -24,8 +25,8 @@ type TrackerRequest struct {
 	StatusCode    int
 	ResponseHeaders http.Header
 	ResponseBody  []byte
-	Done          Done // A channel to signal completion
-	RequestTime   time.Duration // To store the request duration
+	Done          Done
+	RequestTime   time.Duration
 }
 
 type Update struct {
@@ -38,6 +39,7 @@ type RequestTracker struct {
 	requests map[string]*TrackerRequest
 	updates  chan Update
 }
+
 
 func NewRequestTracker() *RequestTracker {
 	rt := &RequestTracker{
@@ -52,7 +54,7 @@ func (rt *RequestTracker) startListener() {
 	for update := range rt.updates {
 		trackerReq, ok := rt.requests[update.reqId]
 		if !ok {
-			log.Printf("Tracker could not find request with ID: %s", update.reqId)
+			log.Debug("Tracker could not find request with ID: %s", update.reqId)
 			continue
 		}
 
@@ -62,7 +64,7 @@ func (rt *RequestTracker) startListener() {
 		if update.resp.Body != nil {
 			body, err := io.ReadAll(update.resp.Body)
 			if err != nil {
-				log.Printf(
+				log.Debug(
 					"Error reading response body for request %s: %v",
 					update.reqId,
 					err,
@@ -74,7 +76,7 @@ func (rt *RequestTracker) startListener() {
 		}
 
 		trackerReq.Status = StatusCompleted
-		log.Printf("Tracker updated state for request ID: %s", update.reqId)
+		log.Debug("Tracker updated state for request ID: %s", update.reqId)
 	}
 }
 
@@ -83,12 +85,12 @@ func (rt *RequestTracker) AddRequest(trackerReq *TrackerRequest) {
 	defer rt.mu.Unlock()
 
 	if trackerReq.Request.ID == "" {
-		log.Printf("Error: Attempted to add a TrackerRequest with no ID.")
+		log.Debug("Error: Attempted to add a TrackerRequest with no ID.")
 		return
 	}
 
 	rt.requests[trackerReq.Request.ID] = trackerReq
-	log.Printf("Tracker added request with ID: %s", trackerReq.Request.ID)
+	log.Debug("Tracker added request with ID: %s", trackerReq.Request.ID)
 }
 
 func (rt *RequestTracker) MarkCompleted(id string, resp *http.Response) {
@@ -97,7 +99,7 @@ func (rt *RequestTracker) MarkCompleted(id string, resp *http.Response) {
 
 	trackerReq, ok := rt.requests[id]
 	if !ok {
-		log.Printf("Failed to find request with ID: %s to mark as completed.", id)
+		log.Debug("Failed to find request with ID: %s to mark as completed.", id)
 		return
 	}
 
@@ -107,7 +109,7 @@ func (rt *RequestTracker) MarkCompleted(id string, resp *http.Response) {
 	if resp.Body != nil {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			log.Printf("Error reading response body for request %s: %v", id, err)
+			log.Debug("Error reading response body for request %s: %v", id, err)
 			trackerReq.Status = StatusError
 			return
 		}
@@ -115,7 +117,7 @@ func (rt *RequestTracker) MarkCompleted(id string, resp *http.Response) {
 	}
 
 	trackerReq.Status = StatusCompleted
-	log.Printf(
+	log.Debug(
 		"Completed request with ID: %s and status code: %d",
 		id,
 		trackerReq.StatusCode,

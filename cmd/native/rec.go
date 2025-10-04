@@ -40,14 +40,14 @@ type CmdSaveRec struct {
 func init() {
 	r := new(CmdRec)
 	r.Name_ = CmdRecName
-	cmd.RegisterSysCmd(r)
 
 	save := new(CmdSaveRec)
 	save.Name_ = CmdSaveRecName
 	recCmdSubCmdRegistery["$save"] = save
 }
 
-func (r *CmdRec) execute(tokens []string) error {
+func (r *CmdRec) Execute(cmdCtx *cmd.CmdContext) error {
+  tokens := cmdCtx.ExpandedTokens
 	if len(tokens) == 0 {
 		return errors.New("please specify sequence name")
 	}
