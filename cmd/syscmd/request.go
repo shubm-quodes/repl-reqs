@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nodding-noddy/repl-reqs/cmd"
 	"github.com/nodding-noddy/repl-reqs/config"
 	"github.com/nodding-noddy/repl-reqs/log"
@@ -62,19 +61,11 @@ type ReqData struct {
 	Payload     map[string]any
 }
 
-type RequestManager struct {
-	Tracker       *RequestTracker
-	Client        *http.Client
-	CommonHeaders http.Header
-}
-
 type CmdParams struct {
 	URL     map[string]string
 	Query   map[string]string
 	Payload map[string]any
 }
-
-var ProccessingReqs = make([]*Request, 1)
 
 var StopSpinnerChannel chan bool = make(chan bool)
 var S *spinner.Spinner
@@ -85,66 +76,6 @@ type Headers map[string]string
 type PollCondition struct {
 	KeySequence []string
 	ExpectedVal string
-}
-
-type Req struct {
-}
-
-type Request struct {
-	ID          string
-	Command     *ReqCmd
-	HttpRequest *http.Request
-}
-
-var commonHeaders = make(KeyValPair)
-
-func NewRequestManager(tracker *RequestTracker, commonHeaders http.Header) *RequestManager {
-	return &RequestManager{
-		Tracker:       tracker,
-		Client:        &http.Client{},
-		CommonHeaders: commonHeaders,
-	}
-}
-
-func (rm *RequestManager) MakeRequest(req *http.Request) (string, <-chan Update, error) {
-	reqID := uuid.New().String()
-	done := make(Done)
-
-	trackerReq := &TrackerRequest{
-		Request: &Request{
-			ID:          reqID,
-			HttpRequest: req,
-		},
-		Status: StatusProcessing,
-		Done:   done,
-	}
-
-	rm.Tracker.AddRequest(trackerReq)
-	update := Update{
-		reqId: reqID,
-	}
-
-	updateChan := make(chan Update)
-	go func(rm *RequestManager, id string, r *http.Request) {
-		defer close(done)
-
-		start := time.Now()
-		resp, err := rm.Client.Do(r)
-		if err != nil {
-			trackerReq.Status = StatusError
-			return
-		}
-
-		requestTime := time.Since(start)
-
-		update.resp = resp
-		rm.Tracker.updates <- update
-		updateChan <- update
-
-		trackerReq.RequestTime = requestTime
-	}(rm, reqID, req)
-
-	return reqID, updateChan, nil
 }
 
 func ParseRawReqs(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
@@ -420,7 +351,7 @@ func (rc *ReqCmd) ExecuteAsync(cmdContext *cmd.CmdContext) {
 		return
 	}
 
-	reqId, updateChan, err := rc.mgr.MakeRequest(req)
+	_, updateChan, err := rc.mgr.MakeRequest(req)
 	if err != nil {
 		t.SetError(err)
 		uChan <- (*t)
@@ -443,7 +374,6 @@ func (rc *ReqCmd) ExecuteAsync(cmdContext *cmd.CmdContext) {
 		log.Debug("failed to unmarshal response body", err.Error())
 		return
 	}
-	fmt.Printf("successfully completed request with id '%s'\n", reqId)
 
 	t.SetDone(true)
 	t.SetResult(up.resp)
