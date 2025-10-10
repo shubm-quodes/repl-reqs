@@ -13,14 +13,12 @@ import (
 )
 
 // Loads and initializes configuration parameters based on user supplied flags.
-func Initialize(flags *Flags) *AppCfg {
-	log.SetDebug(flags.enableDebugging)
+func Initialize(flags *FlagVal) *AppCfg {
 	appCfg = NewAppCfg()
 	appCfg.DirPath = flags.configPath
 	appCfg.File = path.Join(flags.configPath, "config.json")
 	appCfg.HistoryFile = path.Join(flags.configPath, "history")
 	appCfg.VimMode = flags.enableVimMode
-	appCfg.DefaultEditor = getReplEditor()
 	appCfg.Load()
 	return appCfg
 }

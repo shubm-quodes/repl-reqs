@@ -56,6 +56,7 @@ func NewAppCfg() *AppCfg {
 	return &AppCfg{
 		truncatePrompt: true,
 		maxPromptChars: 20,
+		DefaultEditor:  getReplEditor(),
 	}
 }
 
