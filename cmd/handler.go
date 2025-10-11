@@ -54,6 +54,7 @@ type CmdHandler struct {
 	tasks              map[string]*TaskStatus
 	spinner            *spinner.Spinner
 	currFgTaskId       string
+	lastBgTaskId       string
 	fgTaskIdChan       chan string
 	bgTaskIdChan       chan string
 }
@@ -80,7 +81,11 @@ func NewCmdHandler(
 
 	rlCfg.KeyListeners = make(map[rune]readline.FuncKeypressHandler)
 	rlCfg.KeyListeners[0x06] = func() bool {
-		cmh.bgTaskIdChan <- cmh.currFgTaskId
+		if cmh.currFgTaskId == "" {
+			cmh.AttemptToBringLastBgToFg()
+		} else {
+			cmh.bgTaskIdChan <- cmh.currFgTaskId
+		}
 		return false
 	}
 
@@ -395,7 +400,7 @@ func (h *CmdHandler) listenForTaskUpdates() {
 		case fgTaskId := <-h.fgTaskIdChan:
 			h.bringTaskToFg(fgTaskId)
 
-		case <-h.bgTaskIdChan:
+		case h.lastBgTaskId = <-h.bgTaskIdChan:
 			h.sendTaskToBg()
 		}
 	}
@@ -410,6 +415,9 @@ func (h *CmdHandler) updateSpinnerMsg(ts *TaskStatus) {
 }
 
 func (h *CmdHandler) sendTaskToBg() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	taskId := h.currFgTaskId
 	if taskId != "" && h.spinner.Active() {
 		h.currFgTaskId = ""
@@ -421,6 +429,7 @@ func (h *CmdHandler) sendTaskToBg() {
 
 func (h *CmdHandler) bringTaskToFg(taskId string) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	if h.currFgTaskId != "" {
 		h.spinner.Stop()
@@ -431,7 +440,9 @@ func (h *CmdHandler) bringTaskToFg(taskId string) {
 	if task, exists := h.tasks[taskId]; exists {
 		h.updateSpinnerMsg(task)
 		h.currFgTaskId = taskId
+		fmt.Println("\nlast active task is now in foreground")
 		h.spinner.Start()
+		h.RefreshPrompt()
 	}
 }
 
@@ -563,6 +574,21 @@ func (h *CmdHandler) RegisterListener(
 	}
 }
 
+func (h *CmdHandler) AttemptToBringLastBgToFg() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.currFgTaskId != "" {
+		return
+	}
+	h.fgTaskIdChan <- h.lastBgTaskId
+}
+
+func (h *CmdHandler) GetDefaultCtxId() CmdCtxID {
+	id, _ := h.defaultCtx.Value(CmdCtxIdKey).(CmdCtxID) // Yeah yeah don't worry.. there won't be a case where this is otherwise ^_^
+	return id
+}
+
 func isLikeAVariable(segment string) bool {
 	return strings.HasPrefix(segment, "{{")
 }
@@ -572,7 +598,7 @@ func prependSpc(options *[][]rune) {
 	(*options)[0] = []rune{32}
 }
 
-func FormatPrompt(promptTxt string, mascot string) string {
+func FormatPrompt(promptTxt, mascot string) string {
 	if strings.Trim(mascot, " ") == "" {
 		mascot = config.GetDefaultMascot()
 	}
