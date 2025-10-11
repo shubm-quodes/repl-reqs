@@ -9,7 +9,7 @@ import (
 	"github.com/nodding-noddy/repl-reqs/util"
 )
 
-func (c *AppConfig) Load() {
+func (c *AppCfg) Load() {
 	if !c.isCfgTemplateExists() {
 		c.initializeCfgTemplate()
 	}
@@ -18,7 +18,7 @@ func (c *AppConfig) Load() {
 	util.CopyMap(activeVars, c.RawCfg.Commons.vars)
 }
 
-func (c *AppConfig) setBaseURL(conf map[string]any) {
+func (c *AppCfg) setBaseURL(conf map[string]any) {
 	if baseUrl, found := conf["baseUrl"].(string); found {
 		if !strings.HasSuffix(baseUrl, "/") {
 			baseUrl = baseUrl + "/"
@@ -32,7 +32,7 @@ func (c *AppConfig) setBaseURL(conf map[string]any) {
 	os.Exit(1)
 }
 
-func (c *AppConfig) loadCfg() {
+func (c *AppCfg) loadCfg() {
 	fileContents, err := os.ReadFile(c.File)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to read config file: %s", err.Error())
