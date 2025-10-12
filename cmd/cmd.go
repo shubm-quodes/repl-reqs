@@ -6,30 +6,33 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/nodding-noddy/repl-reqs/util"
 )
+
+const CmdCtxIdKey CmdCtxID = "cmdCtx"
 
 var (
 	keyListenerRegistry = make(KeyListenerRegistry)
 )
 
-type CmdContext struct {
-	Ctx context.Context
-	RawTokens []string
+type CmdCtxID string
+
+type CmdCtx struct {
+	Ctx            context.Context
+	RawTokens      []string
 	ExpandedTokens []string
 }
 
 type Cmd interface {
 	Name() string
 	Desc() string
-	setCmdHandler(*CmdHandler)
+	setHandler(*CmdHandler)
 	GetCmdHandler() *CmdHandler
 	GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int)
 	GetSubCmds() SubCmd
 	AddSubCmd(cmd Cmd) Cmd
 	WalkTillLastSubCmd(tokens [][]rune) (remainingTkns [][]rune, c Cmd)
 	filterSuggestions(partial string, offset int) [][]rune
-	Execute(*CmdContext) (context.Context, error)
+	Execute(*CmdCtx) (context.Context, error)
 	SetTaskStatus(*taskStatus)
 	GetTaskStatus() *taskStatus
 	cleanup()
@@ -45,7 +48,7 @@ type BaseCmd struct {
 
 type AsyncCmd interface {
 	Cmd
-	ExecuteAsync(*CmdContext)
+	ExecuteAsync(*CmdCtx)
 }
 
 type SubCmd map[string]Cmd
@@ -57,27 +60,12 @@ type KeyListener struct {
 
 type KeyListenerRegistry map[rune]*KeyListener
 
-// type TaskStatus struct {
-// 	Id        string
-// 	Ctx       context.Context
-// 	Message   string
-// 	Error     error
-// 	Done      bool
-// 	Result    any
-// 	CreatedAt time.Time
-// }
-
-// type TaskStatus interface {
-// 	GetID() string
-// 	GetMessage() string
-// 	GetErr() error
-// 	GetResult() any
-//
-// 	SetID() string
-// 	SetMessage() string
-// 	SetErr() error
-// 	SetResult() any
-// }
+func NewBaseCmd(name, desc string) *BaseCmd {
+	return &BaseCmd{
+		Name_: name,
+		Desc_: desc,
+	}
+}
 
 func (c *BaseCmd) Name() string {
 	return c.Name_
@@ -167,7 +155,7 @@ func (c *BaseCmd) filterSuggestions(partial string, offset int) [][]rune {
 	return suggestions
 }
 
-func (c *BaseCmd) setCmdHandler(cmh *CmdHandler) {
+func (c *BaseCmd) setHandler(cmh *CmdHandler) {
 	c.handler = cmh
 }
 
@@ -191,10 +179,8 @@ func (c *BaseCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 }
 
 // Just a default Execute method if no args or an invalid sub cmd gets provided
-func (c *BaseCmd) Execute(cmdCtx *CmdContext) (context.Context, error) {
-	subCmds := c.GetSubCmdList()
-	formattedList := util.GetTruncatedStr(strings.Join(subCmds, ", "))
-	fmt.Printf("available sub commands for %s are %v\n", c.Name_, formattedList)
+func (c *BaseCmd) Execute(cmdCtx *CmdCtx) (context.Context, error) {
+	c.GetCmdHandler().PushCmdMode(c.Name_, c)
 	return cmdCtx.Ctx, nil
 }
 
@@ -341,6 +327,12 @@ func stripQuotes(value string) string {
 	}
 
 	return value
+}
+
+func (c *CmdCtx) ID() string {
+	v := c.Ctx.Value(CmdCtxIdKey)
+	id, _ := v.(string)
+	return string(id)
 }
 
 // func parseParamsWithConditionalQuotes(tokens []string) (map[string]string, error) {
