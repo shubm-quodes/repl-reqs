@@ -22,8 +22,11 @@ func main() {
 		fmt.Println("failed to initialize command handler", err)
 		os.Exit(1)
 	} else {
-		syscmd.ParseRawReqs(cfg.RawCfg, cmdHandler)
-		cmdHandler.InjectIntoReg()
+		if err := syscmd.InitNetCmds(cfg.RawCfg, cmdHandler); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+    cmdHandler.InjectIntoReg()
 		cmdHandler.Repl(cfg.GetPrompt(), cfg.GetPromptMascot())
 	}
 }

@@ -7,23 +7,24 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nodding-noddy/repl-reqs/util"
 )
 
 type Tracker interface {
-	AddRequest(reqID, status string)
-	GetStatus(reqID string) (string, bool)
+	AddRequest(*TrackerRequest)
 }
 
 type RequestManager struct {
-	tracker       Tracker
+	tracker       *RequestTracker
 	client        *http.Client
 	commonHeaders http.Header
-	requests      map[string]*LRUList
+	requests      map[string]*util.LRUList[string, *Request]
+	drafts        map[string]*util.LRUList[string, *RequestDraft]
 	mu            sync.Mutex
 }
 
 func NewRequestManager(
-	tracker Tracker,
+	tracker *RequestTracker,
 	client *http.Client,
 	commonHeaders http.Header,
 ) *RequestManager {
@@ -34,12 +35,23 @@ func NewRequestManager(
 		tracker:       tracker,
 		client:        client,
 		commonHeaders: commonHeaders,
-		requests:      make(map[string]*LRUList),
+		drafts:        make(map[string]*util.LRUList[string, *RequestDraft]),
+		requests:      make(map[string]*util.LRUList[string, *Request]),
 	}
 }
 
+func (rm *RequestManager) AddDraftRequest(context string, draftReq *RequestDraft) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if _, ok := rm.drafts[context]; !ok {
+		rm.drafts[context] = util.NewLRUList[string, *RequestDraft]()
+	}
+	rm.drafts[context].AddOrTouch(draftReq)
+}
+
 func (rm *RequestManager) AddRequest(context string, req *http.Request) (string, error) {
-	reqID := uuid.New().String()
+	reqID := uuid.NewString()
 	newRequest := &Request{
 		ID:          reqID,
 		HttpRequest: req,
@@ -49,7 +61,7 @@ func (rm *RequestManager) AddRequest(context string, req *http.Request) (string,
 	defer rm.mu.Unlock()
 
 	if _, ok := rm.requests[context]; !ok {
-		rm.requests[context] = NewLRUList()
+		rm.requests[context] = util.NewLRUList[string, *Request]()
 	}
 	rm.requests[context].AddOrTouch(newRequest)
 
@@ -66,6 +78,28 @@ func (rm *RequestManager) GetRequest(context string, index int) (*Request, error
 	return nil, nil
 }
 
+func (rm *RequestManager) GetRequestDrafts(context string) []*RequestDraft {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if lru, ok := rm.drafts[context]; ok {
+		return lru.GetAll()
+	}
+	return nil
+}
+
+func (rm *RequestManager) PeakRequestDraft(context string) *RequestDraft {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if lru, ok := rm.drafts[context]; ok {
+		draft, _ := lru.GetAt(0)
+		return draft
+	}
+
+	return nil
+}
+
 func (rm *RequestManager) GetRequests(context string) ([]*Request, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
@@ -76,27 +110,54 @@ func (rm *RequestManager) GetRequests(context string) ([]*Request, error) {
 	return nil, nil
 }
 
-func (rm *RequestManager) MakeRequest(reqID string, req *http.Request) error {
+func (rm *RequestManager) MakeRequest(req *http.Request) (string, <-chan Update, error) {
+	reqID := uuid.New().String()
+	done := make(Done)
+	rm.copyCommonHeaders(req)
+
+	trackerReq := &TrackerRequest{
+		Request: &Request{
+			ID:          reqID,
+			HttpRequest: req,
+		},
+		Status: StatusProcessing,
+		Done:   done,
+	}
+
+	rm.tracker.AddRequest(trackerReq)
+	update := Update{
+		reqId: reqID,
+	}
+
+	updateChan := make(chan Update)
+	go func(rm *RequestManager, id string, r *http.Request) {
+		defer close(done)
+
+		start := time.Now()
+		resp, err := rm.client.Do(r)
+		if err != nil {
+			update.err = err
+			trackerReq.Status = StatusError
+		}
+
+		requestTime := time.Since(start)
+
+		update.resp = resp
+		rm.tracker.updates <- update
+		updateChan <- update
+
+		trackerReq.RequestTime = requestTime
+	}(rm, reqID, req)
+
+	return reqID, updateChan, nil
+}
+
+func (rm *RequestManager) copyCommonHeaders(req *http.Request) {
 	for key, values := range rm.commonHeaders {
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
 	}
-
-	rm.tracker.AddRequest(reqID, StatusProcessing)
-
-	go func(reqID string, r *http.Request) {
-		resp, err := rm.client.Do(r)
-		if err != nil {
-			rm.tracker.AddRequest(reqID, StatusFailed)
-			return
-		}
-		defer resp.Body.Close()
-
-		rm.tracker.AddRequest(reqID, StatusCompleted)
-	}(reqID, req)
-
-	return nil
 }
 
 func (rm *RequestManager) CycleRequests(context string) (*Request, error) {
@@ -110,11 +171,11 @@ func (rm *RequestManager) CycleRequests(context string) (*Request, error) {
 
 	requests := lru.GetAll()
 	if len(requests) <= 1 {
-		return nil, nil 
+		return nil, nil
 	}
 
 	currentIndex := 0
-	
+
 	nextIndex := (currentIndex + 1) % len(requests)
 	nextRequest := requests[nextIndex]
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fatih/color"
 	"github.com/nodding-noddy/repl-reqs/cmd"
 	c "github.com/nodding-noddy/repl-reqs/config"
 	"github.com/nodding-noddy/repl-reqs/util"
@@ -23,6 +24,7 @@ const (
 	CmdEnvName          = "env"
 	CmdVarName          = "var"
 	CmdURLName          = "url"
+	CmdQueryName        = "query"
 	CmdHeaderName       = "header"
 	CmdMultiHeadersName = "multi-headers"
 	CmdHTTPVerbName     = "httpVerb"
@@ -40,25 +42,29 @@ type CmdVar struct {
 }
 
 type CmdURL struct {
-	*cmd.BaseCmd
+	*BaseReqCmd
 }
 
 type CmdHeader struct {
-	*cmd.BaseCmd
+	*BaseReqCmd
 }
 
 type CmdMultiHeaders struct {
-	*cmd.BaseCmd
+	*BaseReqCmd
 	req *http.Request
 	mu  *sync.Mutex
 }
 
 type CmdHTTPVerb struct {
-	*cmd.BaseCmd
+	*BaseReqCmd
 }
 
 type CmdPayload struct {
-	*cmd.BaseCmd
+	*BaseReqCmd
+}
+
+type CmdQuery struct {
+	*BaseReqCmd
 }
 
 type CmdPrompt struct {
@@ -75,12 +81,42 @@ type setCmd struct {
 
 var CurrReqIdx int
 
-type Vars map[string]interface{}
+func (ch *CmdHeader) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	ctx, tokens := cmdCtx.Ctx, cmdCtx.RawTokens
+	if len(tokens) < 2 {
+		return ctx, errors.New("please provide header [key] [val]")
+	}
 
-var variables = make(Vars)
+	key, val := tokens[0], tokens[1]
+	reqDraft := ch.Mgr.PeakRequestDraft(cmdCtx.ID())
 
-func (cmh *CmdMultiHeaders) Execute(cmdContext *cmd.CmdContext) (context.Context, error) {
-	ctx := cmdContext.Ctx
+	reqDraft.SetHeader(key, val)
+	return ctx, nil
+}
+func (u *CmdURL) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	if u.Mgr == nil {
+		return cmdCtx.Ctx, errors.New("failed to set url, manager unavailable")
+	}
+	if len(cmdCtx.ExpandedTokens) == 0 {
+		return cmdCtx.Ctx, errors.New("please specify url :/")
+	}
+	url := cmdCtx.ExpandedTokens[0]
+	rMgr := u.Mgr
+	draft := rMgr.PeakRequestDraft(cmdCtx.ID())
+	if draft != nil {
+		draft.SetUrl(url)
+		prompt := url
+		if draft.GetMethod() != "" {
+			prompt = fmt.Sprintf("%s [%s]", url, draft.GetMethod())
+		}
+		u.GetCmdHandler().SetPrompt(prompt, "")
+		return cmdCtx.Ctx, nil
+	}
+	return cmdCtx.Ctx, errors.New("no request to draft")
+}
+
+func (cmh *CmdMultiHeaders) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	ctx := cmdCtx.Ctx
 	handler := cmh.GetCmdHandler()
 
 	if handler.GetCurrentCmdMode() != cmh {
@@ -92,9 +128,22 @@ func (cmh *CmdMultiHeaders) Execute(cmdContext *cmd.CmdContext) (context.Context
 	}
 }
 
+func (cmh *CmdQuery) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	tokens, ctx := cmdCtx.RawTokens, cmdCtx.Ctx
+	if len(tokens) < 2 {
+		return ctx, errors.New("query 'key' and 'value' are required")
+	}
+
+	key, val := tokens[0], strings.Join(tokens[1:], " ")
+	rMgr := cmh.Mgr
+	draft := rMgr.PeakRequestDraft(cmdCtx.ID())
+	draft.SetQueryParam(key, val)
+	return ctx, nil
+}
+
 func (cmh *CmdMultiHeaders) setHeader(key, val string) error {
 	if util.AreEmptyStrs(key, val) {
-		errors.New("please provide both header key and value")
+		return errors.New("please provide both header key and value")
 	}
 	cmh.req.Header.Set(key, val)
 	return nil
@@ -102,10 +151,10 @@ func (cmh *CmdMultiHeaders) setHeader(key, val string) error {
 
 func (cmh *CmdMultiHeaders) activateMultiHeaderMode() {
 	handler := cmh.GetCmdHandler() // here is says cmh.GetCmdHandler undefined
-	handler.SetCurrentCmdMode("$multi-headers", cmh)
+	handler.PushCmdMode("$multi-headers", cmh)
 }
 
-func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify httpverb")
@@ -114,10 +163,20 @@ func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdContext) (context.Context, error)
 	if !isValidHttpVerb(HTTPMethod(httpVerb)) {
 		return ctx, fmt.Errorf(`invalid httpVerb "%s"`, httpVerb)
 	}
+	draft := chv.Mgr.PeakRequestDraft(cmdCtx.ID())
+	if draft == nil {
+		return ctx, errors.New("request draft not found")
+	}
+	url := draft.SetMethod(httpVerb).
+		GetUrl()
+	if url != "" {
+		prompt := fmt.Sprintf("%s [%s]", color.MagentaString(url), color.GreenString(httpVerb))
+		chv.GetCmdHandler().SetPrompt(prompt, "")
+	}
 	return ctx, nil
 }
 
-func (ec *CmdEnv) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+func (ec *CmdEnv) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify environment name")
@@ -132,7 +191,7 @@ func (ec *CmdEnv) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
 	return ctx, nil
 }
 
-func (vc *CmdVar) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+func (vc *CmdVar) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) < 2 {
 		return ctx, errors.New(
@@ -149,12 +208,7 @@ func (vc *CmdVar) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
 	return ctx, nil
 }
 
-func getVar[T interface{}](name string) (T, bool) {
-	found, ok := variables[name].(T)
-	return found, ok
-}
-
-func (pc *CmdPrompt) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+func (pc *CmdPrompt) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify prompt")
@@ -171,7 +225,7 @@ func (pc *CmdPrompt) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
 	return ctx, nil
 }
 
-func (cm *CmdMascot) Execute(cmdCtx *cmd.CmdContext) (context.Context, error) {
+func (cm *CmdMascot) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify mascot")

@@ -14,6 +14,7 @@ import (
 	"github.com/nodding-noddy/repl-reqs/cmd"
 	"github.com/nodding-noddy/repl-reqs/config"
 	"github.com/nodding-noddy/repl-reqs/log"
+	"github.com/nodding-noddy/repl-reqs/network"
 	"github.com/nodding-noddy/repl-reqs/util"
 
 	"github.com/alecthomas/chroma"
@@ -37,21 +38,34 @@ const (
 	TRACE   HTTPMethod = http.MethodTrace
 )
 
+type ReqMgrAware interface {
+	SetReqMgr(mgr *network.RequestManager)
+}
+
 type KeyValPair map[string]string
 type ValidationSchema map[string]Validation
 
-type ReqProps struct {
-	Url         string           `json:"url"`
-	HttpMethod  HTTPMethod       `json:"httpMethod"`
-	Headers     KeyValPair       `json:"headers"`
+type ReqPropsSchema struct {
 	QueryParams ValidationSchema `json:"queryParams"`
 	UrlParams   ValidationSchema `json:"urlParams"`
 	Payload     ValidationSchema `json:"payload"`
 }
 
-type ReqCmd struct {
-	mgr *RequestManager
+type ReqProps struct {
+	Url        string     `json:"url"`
+	HttpMethod HTTPMethod `json:"httpMethod"`
+	Headers    KeyValPair `json:"headers"`
+	*ReqPropsSchema
+	*network.RequestDraft
+}
+
+type BaseReqCmd struct {
 	*cmd.BaseCmd
+	Mgr *network.RequestManager
+}
+
+type ReqCmd struct {
+	*BaseReqCmd
 	*ReqProps
 }
 
@@ -78,8 +92,90 @@ type PollCondition struct {
 	ExpectedVal string
 }
 
-func ParseRawReqs(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
-	util.CopyMap(commonHeaders, rawCfg.Commons.Headers)
+func NewBaseReqCmd(name string) *BaseReqCmd {
+	return &BaseReqCmd{
+		BaseCmd: &cmd.BaseCmd{
+			Name_: name,
+		},
+	}
+}
+
+func NewReqCmd(name string, mgr *network.RequestManager) *ReqCmd {
+	return &ReqCmd{
+		BaseReqCmd: NewBaseReqCmd(name),
+		ReqProps: &ReqProps{
+			ReqPropsSchema: &ReqPropsSchema{
+				QueryParams: make(ValidationSchema),
+				UrlParams:   make(ValidationSchema),
+				Payload:     make(ValidationSchema),
+			},
+		},
+	}
+}
+
+func (brc *BaseReqCmd) SetReqMgr(mgr *network.RequestManager) {
+	brc.Mgr = mgr
+}
+
+func (rc *ReqCmd) SetUrl(url string) *ReqCmd {
+	rc.Url = url
+	return rc
+}
+
+func (rc *ReqCmd) SetMethod(method HTTPMethod) *ReqCmd {
+	rc.HttpMethod = method
+	return rc
+}
+
+func (rc *ReqCmd) SetHeaders(headers KeyValPair) *ReqCmd {
+	rc.Headers = headers
+	return rc
+}
+
+func InitNetCmds(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
+	mgr := network.NewRequestManager(
+		network.NewRequestTracker(),
+		nil,
+		strMapToHttpHeader(rawCfg.Commons.Headers),
+	)
+	if err := parseRawReqCfg(rawCfg, hdlr, mgr); err != nil {
+		return err
+	}
+	injectReqMgr(hdlr, mgr)
+	return nil
+}
+
+func injectReqMgr(hdlr *cmd.CmdHandler, mgr *network.RequestManager) {
+	for _, c := range hdlr.GetCmdRegistry().GetAllCmds() {
+    if c == nil {
+      continue
+    }
+		if rmAware, ok := c.(ReqMgrAware); ok {
+			rmAware.SetReqMgr(mgr)
+		}
+    if subCmds := c.GetSubCmds(); subCmds != nil {
+      injectReqMgrIntoSubCmds(subCmds, mgr)
+    }
+	}
+}
+
+func injectReqMgrIntoSubCmds(reg map[string]cmd.Cmd, mgr *network.RequestManager) {
+	for _, cmd := range reg {
+		if rmAware, ok := cmd.(ReqMgrAware); ok {
+			rmAware.SetReqMgr(mgr)
+		}
+		subCmds := cmd.GetSubCmds()
+		if len(subCmds) > 0 {
+			injectReqMgrIntoSubCmds(subCmds, mgr)
+		}
+	}
+}
+
+func parseRawReqCfg(
+	rawCfg config.RawCfg,
+	hdlr *cmd.CmdHandler,
+	rMgr *network.RequestManager,
+) error {
 	for _, req := range rawCfg.RawRequests {
 		var rawProps struct {
 			Cmd            string          `json:"cmd"`
@@ -93,24 +189,27 @@ func ParseRawReqs(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
 		if err := json.Unmarshal(req, &rawProps); err != nil {
 			return err
 		}
-		reqCmd := &ReqCmd{
-			BaseCmd: &cmd.BaseCmd{
-				Name_: "", //IMP: Since there could be multiple segments.
-			},
-			ReqProps: &ReqProps{
-				HttpMethod: rawProps.HttpMethod,
-				Url:        rawProps.Url,
-				Headers:    rawProps.Headers,
-			},
-		}
+		reqCmd := NewReqCmd("", rMgr).
+			SetUrl(rawProps.Url).
+			SetMethod(rawProps.HttpMethod).
+			SetHeaders(rawProps.Headers)
+
 		reqCmd.initializeVlds(
 			rawProps.RawUrlParams,
 			rawProps.RawQueryParams,
 			rawProps.RawPayload,
 		)
-		reqCmd.register(rawProps.Cmd, hdlr)
+		reqCmd.register(rawProps.Cmd, hdlr, rMgr)
 	}
 	return nil
+}
+
+func strMapToHttpHeader(m map[string]string) http.Header {
+	h := make(http.Header, len(m))
+	for k, v := range m {
+		h[k] = []string{v}
+	}
+	return h
 }
 
 func isValidHttpVerb(verb HTTPMethod) bool {
@@ -122,7 +221,11 @@ func isValidHttpVerb(verb HTTPMethod) bool {
 	}
 }
 
-func (r *ReqCmd) register(cmdWithSubCmds string, hdlr *cmd.CmdHandler) {
+func (r *ReqCmd) register(
+	cmdWithSubCmds string,
+	hdlr *cmd.CmdHandler,
+	rMgr *network.RequestManager,
+) {
 	if strings.Trim(cmdWithSubCmds, " ") == "" {
 		panic("cannot register request cmd without a command")
 	}
@@ -131,8 +234,7 @@ func (r *ReqCmd) register(cmdWithSubCmds string, hdlr *cmd.CmdHandler) {
 	segments := strings.Fields(cmdWithSubCmds)
 	rootCmd := segments[0]
 	cmdRegistry := hdlr.GetCmdRegistry()
-	rMgr := NewRequestManager(NewRequestTracker(), nil)
-	r.mgr = rMgr
+	r.Mgr = rMgr
 
 	if len(segments) == 1 {
 		r.Name_ = rootCmd
@@ -146,12 +248,7 @@ func (r *ReqCmd) register(cmdWithSubCmds string, hdlr *cmd.CmdHandler) {
 			panic(fmt.Sprintf("another non async command already registered with name '%s'", rootCmd))
 		}
 	} else {
-		command = &ReqCmd{
-			BaseCmd: &cmd.BaseCmd{
-				Name_: rootCmd,
-			},
-			mgr: rMgr,
-		}
+		command = NewReqCmd(rootCmd, rMgr)
 		cmdRegistry.RegisterCmd(command)
 	}
 
@@ -163,12 +260,7 @@ func (r *ReqCmd) register(cmdWithSubCmds string, hdlr *cmd.CmdHandler) {
 			r.Name_ = string(token)
 			subCmd.AddSubCmd(r)
 		} else {
-			subCmd = subCmd.AddSubCmd(&ReqCmd{
-				BaseCmd: &cmd.BaseCmd{
-					Name_: string(token),
-				},
-				mgr: rMgr,
-			})
+			subCmd = subCmd.AddSubCmd(NewReqCmd(string(token), rMgr))
 		}
 	}
 }
@@ -312,6 +404,9 @@ func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 }
 
 func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
+	if rc.ReqProps == nil {
+		return
+	}
 	params := []ValidationSchema{rc.QueryParams, rc.UrlParams, rc.Payload}
 	criteria := &util.MatchCriteria[Validation]{
 		Search:     string(search),
@@ -331,8 +426,8 @@ func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
 	return
 }
 
-func (rc *ReqCmd) ExecuteAsync(cmdContext *cmd.CmdContext) {
-	tokens := cmdContext.ExpandedTokens
+func (rc *ReqCmd) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
+	tokens := cmdCtx.ExpandedTokens
 	hdlr := rc.GetCmdHandler()
 	uChan := hdlr.GetUpdateChan()
 	t := rc.GetTaskStatus()
@@ -350,8 +445,13 @@ func (rc *ReqCmd) ExecuteAsync(cmdContext *cmd.CmdContext) {
 		uChan <- (*t)
 		return
 	}
+	rc.MakeRequest(req)
+}
 
-	_, updateChan, err := rc.mgr.MakeRequest(req)
+func (rc *ReqCmd) MakeRequest(req *http.Request) {
+	t := rc.GetTaskStatus()
+	uChan := rc.GetCmdHandler().GetUpdateChan()
+	_, updateChan, err := rc.Mgr.MakeRequest(req)
 	if err != nil {
 		t.SetError(err)
 		uChan <- (*t)
@@ -359,25 +459,30 @@ func (rc *ReqCmd) ExecuteAsync(cmdContext *cmd.CmdContext) {
 	}
 
 	up := <-updateChan
-	defer up.resp.Body.Close()
+	if up.Err() == nil {
+		defer up.Resp().Body.Close()
 
-	resp := make(map[string]any)
-	respBytes, err := io.ReadAll(up.resp.Body)
-	if err != nil {
-		fmt.Println("failed to read response body")
-		log.Debug("failed to read response body", err.Error())
-		return
-	}
-	err = json.Unmarshal(respBytes, &resp)
-	if err != nil {
-		fmt.Println("failed to process response content", err, string(respBytes))
-		log.Debug("failed to unmarshal response body", err.Error())
-		return
-	}
+		resp := make(map[string]any)
+		respBytes, err := io.ReadAll(up.Resp().Body)
+		if err != nil {
+			fmt.Println("failed to read response body")
+			log.Debug("failed to read response body", err.Error())
+			return
+		}
+		err = json.Unmarshal(respBytes, &resp)
+		if err != nil {
+			fmt.Println("failed to process response content", err, string(respBytes))
+			log.Debug("failed to unmarshal response body", err.Error())
+			return
+		}
 
+		t.SetResult(up.Resp())
+		t.SetOutput(getFromattedResp(resp) + "\n" + up.Resp().Status)
+	} else {
+		t.SetError(up.Err())
+		t.SetOutput(up.Err().Error())
+	}
 	t.SetDone(true)
-	t.SetResult(up.resp)
-	t.SetOutput(getFromattedResp(resp) + "\n" + up.resp.Status)
 	uChan <- (*t)
 }
 

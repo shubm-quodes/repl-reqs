@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -14,6 +15,10 @@ import (
 
 	"golang.org/x/term"
 )
+
+const ansi = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PRZcf-ntqry=><~]))"
+
+var re = regexp.MustCompile(ansi)
 
 func OsIsUnixLike() bool {
 	return runtime.GOOS != "windows"
@@ -94,7 +99,7 @@ func Split(line []rune) (tokens [][]rune) {
 func MapSlice[T, M any](s []T, mapFn func(elem T, idx int) M) []M {
 	mappedSlice := make([]M, len(s))
 	for i, v := range s {
-    mappedSlice[i] = mapFn(v, i)
+		mappedSlice[i] = mapFn(v, i)
 	}
 	return mappedSlice
 }
@@ -250,4 +255,8 @@ func AreEmptyStrs(strs ...string) bool {
 		}
 	}
 	return false
+}
+
+func StripAnsi(str string) string {
+	return re.ReplaceAllString(str, "")
 }

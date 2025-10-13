@@ -6,6 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+  TaskStatusInitiated = "initiated"
+)
+
 type taskStatus struct {
 	id        string
 	message   string

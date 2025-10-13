@@ -11,6 +11,8 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/chzyer/readline"
+	"github.com/fatih/color"
+	"github.com/google/uuid"
 	"github.com/nodding-noddy/repl-reqs/config"
 	"github.com/nodding-noddy/repl-reqs/util"
 )
@@ -52,8 +54,10 @@ func NewCmdHandler(
 	rlCfg *readline.Config,
 	reg *CmdRegistry,
 ) (*CmdHandler, error) {
+	defaultCtx := context.Background()
+	defaultCtx = context.WithValue(defaultCtx, CmdCtxIdKey, uuid.NewString())
 	cmh := &CmdHandler{
-		defaultCtx:   context.Background(),
+		defaultCtx:   defaultCtx,
 		appCfg:       appCfg,
 		modes:        make([]*CmdMode, 0),
 		taskUpdates:  make(chan taskStatus),
@@ -80,8 +84,8 @@ func NewCmdHandler(
 	}
 }
 
-func newCmdCtx(ctx context.Context, tokens []string) *CmdContext {
-	return &CmdContext{
+func newCmdCtx(ctx context.Context, tokens []string) *CmdCtx {
+	return &CmdCtx{
 		Ctx:       ctx,
 		RawTokens: tokens,
 	}
@@ -113,12 +117,16 @@ func (h *CmdHandler) GetAppCfg() *config.AppConfig {
 	return h.appCfg
 }
 
-func (h *CmdHandler) SetCurrentCmdMode(modeName string, cmd Cmd) {
+func (h *CmdHandler) PushCmdMode(modeName string, cmd Cmd) {
 	m := new(CmdMode)
 	m.CmdName = modeName
 	m.Cmd = cmd
 	h.modes = append(h.modes, m)
-	h.rl.SetPrompt(modeName + "> ")
+	h.SetPrompt(modeName, " ")
+}
+
+func (h *CmdHandler) SetCurrentCmdMode(mode *CmdMode) {
+	h.SetPrompt(mode.CmdName, " ")
 }
 
 func (h *CmdHandler) SuggestRootCmds(partial string) (suggst [][]rune, offset int) {
@@ -262,8 +270,8 @@ func (h *CmdHandler) HandleCmd(
 	remainingTkns, cmd := Walk(cmd, util.StrArrToRune(tokens))
 	rmTks := len(remainingTkns) + 1/2
 	args := tokens[len(tokens)-rmTks:]
-	cmdCtx := newCmdCtx(context.TODO(), args)
-  cmdCtx.ExpandedTokens = args
+	cmdCtx := newCmdCtx(ctx, args)
+	cmdCtx.ExpandedTokens = args
 
 	if asyncCmd, ok := cmd.(AsyncCmd); ok {
 		return h.HandleAsyncCmd(ctx, asyncCmd, args)
@@ -276,30 +284,26 @@ func (h *CmdHandler) HandleAsyncCmd(
 	cmd AsyncCmd,
 	tokens []string,
 ) (context.Context, error) {
-	task := NewTaskStatus("initiated")
+	task := NewTaskStatus(TaskStatusInitiated)
 	h.spinner.Start()
-  h.taskUpdates <- *task
+	h.taskUpdates <- *task
 
 	taskCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	h.currFgTaskId = task.id
 	cmd.SetTaskStatus(task)
+
 	go func() {
-    cmdCtx := newCmdCtx(taskCtx, tokens)
-    cmdCtx.ExpandedTokens = tokens
 		defer h.spinner.Stop()
+
+		cmdCtx := newCmdCtx(taskCtx, tokens)
+		cmdCtx.ExpandedTokens = tokens
+
 		cmd.ExecuteAsync(cmdCtx)
 	}()
 
 	return taskCtx, nil
-}
-
-func (h *CmdHandler) newSpinner() *spinner.Spinner {
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-	s.Writer = os.Stderr
-	s.Suffix = " Starting..."
-	return s
 }
 
 func (h *CmdHandler) listenForTaskUpdates() {
@@ -335,6 +339,12 @@ func (h *CmdHandler) listenForTaskUpdates() {
 				h.rl.Refresh()
 			}
 
+			if task.error != nil {
+				h.spinner.Stop()
+				color.Red(task.error.Error())
+				h.rl.Refresh()
+			}
+
 			if h.currFgTaskId != "" {
 				h.updateSpinnerMsg(task)
 			}
@@ -346,6 +356,13 @@ func (h *CmdHandler) listenForTaskUpdates() {
 			h.sendTaskToBg()
 		}
 	}
+}
+
+func (h *CmdHandler) newSpinner() *spinner.Spinner {
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	s.Writer = os.Stderr
+	s.Suffix = " Starting..."
+	return s
 }
 
 func (h *CmdHandler) updateSpinnerMsg(ts *taskStatus) {
@@ -382,44 +399,6 @@ func (h *CmdHandler) bringTaskToFg(taskId string) {
 	}
 }
 
-func (h *CmdHandler) processTaskUpdates(
-	ctx context.Context,
-	updates <-chan taskStatus,
-	s *spinner.Spinner,
-) (context.Context, error) {
-	for {
-		select {
-		case u, ok := <-updates:
-			s.Suffix = " " + u.message
-			if !ok {
-				s.FinalMSG = "✅ Task completed successfully!\n"
-				return ctx, nil
-			}
-
-			if u.done {
-				if u.error != nil {
-					s.FinalMSG = fmt.Sprintf("❌ Task failed: %v\n", u.error)
-					return ctx, u.error
-				}
-				s.FinalMSG = "✅ Task completed successfully!\n"
-				return ctx, nil
-			}
-
-			s.Suffix = " " + u.message
-
-		case <-ctx.Done():
-			s.FinalMSG = fmt.Sprintf("🛑 Task canceled: %v\n", ctx.Err())
-
-			go func() {
-				for range updates {
-				}
-			}()
-
-			return ctx, ctx.Err()
-		}
-	}
-}
-
 func (h *CmdHandler) Handle(tokens []string) {
 	if _, err := h.HandleCmd(h.defaultCtx, tokens); err != nil {
 		fmt.Println(err.Error())
@@ -447,7 +426,12 @@ func (h *CmdHandler) PlaySequence(name string) error {
 
 func (h *CmdHandler) SetPrompt(newPrompt string, mascot string) {
 	if strings.Trim(newPrompt, " ") == "" {
-		// log.Warn("prompt cannot be empty, not changed.")
+		return
+	}
+
+	stripped := util.StripAnsi(newPrompt)
+	if len(stripped) > 20 {
+		newPrompt = "..." + newPrompt[len(stripped)-20:]
 	}
 
 	h.rl.SetPrompt(FormatPrompt(newPrompt, mascot))
@@ -467,6 +451,11 @@ func (h *CmdHandler) ExitCmdMode() (quitShell bool) {
 		return true
 	}
 	h.modes = h.modes[:len(h.modes)-1]
+	if len(h.modes) != 0 {
+		h.SetCurrentCmdMode(h.modes[len(h.modes)-1])
+	} else {
+		h.SetPrompt(h.appCfg.GetPrompt(), h.appCfg.GetPromptMascot())
+	}
 	m.Cmd.cleanup()
 	return
 }
@@ -526,7 +515,7 @@ func (handler *CmdHandler) InjectIntoReg() {
 
 func (handler *CmdHandler) injectIntoCmds(reg map[string]Cmd) {
 	for _, cmd := range reg {
-		cmd.setCmdHandler(handler)
+		cmd.setHandler(handler)
 		subCmds := cmd.GetSubCmds()
 		if len(subCmds) > 0 {
 			handler.injectIntoCmds(subCmds)
