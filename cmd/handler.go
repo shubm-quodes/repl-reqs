@@ -401,59 +401,6 @@ func (h *CmdHandler) listenForTaskUpdates() {
 	}
 }
 
-// func (h *CmdHandler) listenForTaskUpdates() {
-// 	for {
-// 		select {
-// 		case statusUpdate, ok := <-h.taskUpdates:
-// 			if !ok {
-// 				h.mu.Lock()
-// 				if h.currFgTaskId != "" {
-// 					h.spinner.Stop()
-// 				}
-// 				h.mu.Unlock()
-// 				return
-// 			}
-// 			h.mu.Lock()
-// 			task, exists := h.tasks[statusUpdate.id]
-// 			if !exists {
-// 				task = &taskStatus{
-// 					id:        statusUpdate.id,
-// 					createdAt: time.Now(),
-// 				}
-// 				h.tasks[statusUpdate.id] = task
-// 			}
-//
-// 			task.message = statusUpdate.message
-// 			task.error = statusUpdate.error
-// 			task.done = statusUpdate.done
-// 			task.result = statusUpdate.result
-// 			task.output = statusUpdate.output
-//
-// 			if task.done && h.currFgTaskId == task.id {
-//         h.spinner.Stop()
-// 				fmt.Println("✅ Task completed\n", task.output)
-// 				h.rl.Refresh()
-// 			}
-//
-// 			if task.error != nil {
-// 				h.spinner.Stop()
-// 				color.Red(task.error.Error())
-// 				h.rl.Refresh()
-// 			}
-//
-// 			if h.currFgTaskId != "" {
-// 				h.updateSpinnerMsg(task)
-// 			}
-//
-// 			h.mu.Unlock()
-// 		case fgTaskId := <-h.fgTaskIdChan:
-// 			h.bringTaskToFg(fgTaskId)
-// 		case <-h.bgTaskIdChan:
-// 			h.sendTaskToBg()
-// 		}
-// 	}
-// }
-
 func (h *CmdHandler) updateSpinnerMsg(ts *TaskStatus) {
 	if ts.error != nil {
 		h.spinner.Suffix = " " + ts.error.Error()
