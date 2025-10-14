@@ -27,6 +27,7 @@ func main() {
 			os.Exit(1)
 		}
     cmdHandler.InjectIntoReg()
+    cmdHandler.ActivateListeners()
 		cmdHandler.Repl(cfg.GetPrompt(), cfg.GetPromptMascot())
 	}
 }

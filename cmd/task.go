@@ -10,7 +10,7 @@ const (
   TaskStatusInitiated = "initiated"
 )
 
-type taskStatus struct {
+type TaskStatus struct {
 	id        string
 	message   string
 	error     error
@@ -20,62 +20,62 @@ type taskStatus struct {
 	createdAt time.Time
 }
 
-func NewTaskStatus(message string) *taskStatus {
-	return &taskStatus{
+func NewTaskStatus(message string) *TaskStatus {
+	return &TaskStatus{
 		id:        uuid.NewString(),
 		message:   message,
 		createdAt: time.Now(),
 	}
 }
 
-func (t taskStatus) GetID() string {
+func (t TaskStatus) GetID() string {
 	return t.id
 }
 
-func (t taskStatus) GetMessage() string {
+func (t TaskStatus) GetMessage() string {
 	return t.message
 }
 
-func (t taskStatus) GetError() error {
+func (t TaskStatus) GetError() error {
 	return t.error
 }
 
-func (t taskStatus) IsDone() bool {
+func (t TaskStatus) IsDone() bool {
 	return t.done
 }
 
-func (t taskStatus) GetResult() any {
+func (t TaskStatus) GetResult() any {
 	return t.result
 }
 
-func (t taskStatus) GetCreatedAt() time.Time {
+func (t TaskStatus) GetCreatedAt() time.Time {
 	return t.createdAt
 }
 
-func (t *taskStatus) GetOutput(out string) string {
+func (t *TaskStatus) GetOutput(out string) string {
   return t.output
 }
 
-func (t *taskStatus) SetMessage(message string) {
+func (t *TaskStatus) SetMessage(message string) {
 	t.message = message
 }
 
-func (t *taskStatus) SetError(err error) {
+func (t *TaskStatus) SetError(err error) {
 	t.error = err
 }
 
-func (t *taskStatus) SetDone(done bool) {
+func (t *TaskStatus) SetDone(done bool) {
 	t.done = done
 }
 
-func (t *taskStatus) SetResult(result any) {
+func (t *TaskStatus) SetResult(result any) {
 	t.result = result
 }
 
-func (t *taskStatus) SetCreatedAt(createdAt time.Time) {
+func (t *TaskStatus) SetCreatedAt(createdAt time.Time) {
 	t.createdAt = createdAt
 }
 
-func (t *taskStatus) SetOutput(out string) {
+func (t *TaskStatus) SetOutput(out string) {
   t.output = out
 }

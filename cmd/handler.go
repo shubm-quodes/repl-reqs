@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +18,7 @@ import (
 
 type CmdMode struct {
 	CmdName string
+	prompt  string
 	Cmd     Cmd
 }
 
@@ -29,9 +29,18 @@ type Step struct {
 
 type Sequence []Step
 
+type ListernerAction string
+type KeyListener struct {
+	key     rune
+	handler readline.FuncKeypressHandler
+}
+
+type KeyListenerRegistry map[ListernerAction]*KeyListener
+
 type CmdHandler struct {
 	appCfg             *config.AppConfig
 	cmdRegistry        *CmdRegistry
+	listeners          KeyListenerRegistry
 	rl                 *readline.Instance
 	modes              []*CmdMode
 	mu                 sync.Mutex
@@ -41,8 +50,8 @@ type CmdHandler struct {
 	activeSequenceName string
 	sequenceRegistry   map[string]Sequence
 	defaultCtx         context.Context
-	taskUpdates        chan taskStatus
-	tasks              map[string]*taskStatus
+	taskUpdates        chan TaskStatus
+	tasks              map[string]*TaskStatus
 	spinner            *spinner.Spinner
 	currFgTaskId       string
 	fgTaskIdChan       chan string
@@ -60,10 +69,11 @@ func NewCmdHandler(
 		defaultCtx:   defaultCtx,
 		appCfg:       appCfg,
 		modes:        make([]*CmdMode, 0),
-		taskUpdates:  make(chan taskStatus),
+		listeners:    make(KeyListenerRegistry),
+		taskUpdates:  make(chan TaskStatus),
 		fgTaskIdChan: make(chan string),
 		bgTaskIdChan: make(chan string),
-		tasks:        map[string]*taskStatus{},
+		tasks:        map[string]*TaskStatus{},
 		cmdRegistry:  reg,
 		spinner:      spinner.New(spinner.CharSets[14], 100*time.Millisecond),
 	}
@@ -102,6 +112,10 @@ func (h *CmdHandler) GetCurrentCmdMode() Cmd {
 	return nil
 }
 
+func (h *CmdHandler) GetDefaultCtx() context.Context {
+	return h.defaultCtx
+}
+
 func (h *CmdHandler) GetCmdByName(name string) Cmd {
 	if cmd, found := h.cmdRegistry.GetCmdByName(name); found {
 		return cmd
@@ -109,7 +123,7 @@ func (h *CmdHandler) GetCmdByName(name string) Cmd {
 	return nil
 }
 
-func (h *CmdHandler) GetUpdateChan() chan<- taskStatus {
+func (h *CmdHandler) GetUpdateChan() chan<- TaskStatus {
 	return h.taskUpdates
 }
 
@@ -306,66 +320,140 @@ func (h *CmdHandler) HandleAsyncCmd(
 	return taskCtx, nil
 }
 
+func (h *CmdHandler) handleUpdateChanClose() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.currFgTaskId != "" {
+		h.spinner.Stop()
+	}
+}
+
+func (h *CmdHandler) handleTaskUpdate(statusUpdate TaskStatus) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	task := h.findOrCreateTask(statusUpdate.id)
+	h.updateTaskStatus(task, statusUpdate)
+	h.handleTaskCompletionOrError(task)
+
+	if h.currFgTaskId != "" {
+		h.updateSpinnerMsg(task)
+	}
+}
+
+func (h *CmdHandler) findOrCreateTask(id string) *TaskStatus {
+	task, exists := h.tasks[id]
+	if !exists {
+		task = &TaskStatus{
+			id:        id,
+			createdAt: time.Now(),
+		}
+		h.tasks[id] = task
+	}
+	return task
+}
+
+func (h *CmdHandler) updateTaskStatus(task *TaskStatus, update TaskStatus) {
+	task.message = update.message
+	task.error = update.error
+	task.done = update.done
+	task.result = update.result
+	task.output = update.output
+}
+
+func (h *CmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
+	if task.done && h.currFgTaskId == task.id && task.error == nil {
+		h.spinner.Stop()
+		fmt.Println("✅ Task completed\n", task.output)
+		h.rl.Refresh()
+    return
+	}
+
+	if task.error != nil {
+		h.spinner.Stop()
+    msg := task.error.Error()
+    if task.output != "" {
+      msg = task.output
+    }
+		color.Red(msg)
+		h.rl.Refresh()
+	}
+}
+
 func (h *CmdHandler) listenForTaskUpdates() {
 	for {
 		select {
 		case statusUpdate, ok := <-h.taskUpdates:
 			if !ok {
-				h.mu.Lock()
-				if h.currFgTaskId != "" {
-					h.spinner.Stop()
-				}
-				h.mu.Unlock()
+				h.handleUpdateChanClose()
 				return
 			}
-			h.mu.Lock()
-			task, exists := h.tasks[statusUpdate.id]
-			if !exists {
-				task = &taskStatus{
-					id:        statusUpdate.id,
-					createdAt: time.Now(),
-				}
-				h.tasks[statusUpdate.id] = task
-			}
+			h.handleTaskUpdate(statusUpdate)
 
-			task.message = statusUpdate.message
-			task.error = statusUpdate.error
-			task.done = statusUpdate.done
-			task.result = statusUpdate.result
-			task.output = statusUpdate.output
-
-			if task.done && h.currFgTaskId == task.id {
-				fmt.Println("✅ Task completed\n", task.output)
-				h.rl.Refresh()
-			}
-
-			if task.error != nil {
-				h.spinner.Stop()
-				color.Red(task.error.Error())
-				h.rl.Refresh()
-			}
-
-			if h.currFgTaskId != "" {
-				h.updateSpinnerMsg(task)
-			}
-
-			h.mu.Unlock()
 		case fgTaskId := <-h.fgTaskIdChan:
 			h.bringTaskToFg(fgTaskId)
+
 		case <-h.bgTaskIdChan:
 			h.sendTaskToBg()
 		}
 	}
 }
 
-func (h *CmdHandler) newSpinner() *spinner.Spinner {
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-	s.Writer = os.Stderr
-	s.Suffix = " Starting..."
-	return s
-}
+// func (h *CmdHandler) listenForTaskUpdates() {
+// 	for {
+// 		select {
+// 		case statusUpdate, ok := <-h.taskUpdates:
+// 			if !ok {
+// 				h.mu.Lock()
+// 				if h.currFgTaskId != "" {
+// 					h.spinner.Stop()
+// 				}
+// 				h.mu.Unlock()
+// 				return
+// 			}
+// 			h.mu.Lock()
+// 			task, exists := h.tasks[statusUpdate.id]
+// 			if !exists {
+// 				task = &taskStatus{
+// 					id:        statusUpdate.id,
+// 					createdAt: time.Now(),
+// 				}
+// 				h.tasks[statusUpdate.id] = task
+// 			}
+//
+// 			task.message = statusUpdate.message
+// 			task.error = statusUpdate.error
+// 			task.done = statusUpdate.done
+// 			task.result = statusUpdate.result
+// 			task.output = statusUpdate.output
+//
+// 			if task.done && h.currFgTaskId == task.id {
+//         h.spinner.Stop()
+// 				fmt.Println("✅ Task completed\n", task.output)
+// 				h.rl.Refresh()
+// 			}
+//
+// 			if task.error != nil {
+// 				h.spinner.Stop()
+// 				color.Red(task.error.Error())
+// 				h.rl.Refresh()
+// 			}
+//
+// 			if h.currFgTaskId != "" {
+// 				h.updateSpinnerMsg(task)
+// 			}
+//
+// 			h.mu.Unlock()
+// 		case fgTaskId := <-h.fgTaskIdChan:
+// 			h.bringTaskToFg(fgTaskId)
+// 		case <-h.bgTaskIdChan:
+// 			h.sendTaskToBg()
+// 		}
+// 	}
+// }
 
-func (h *CmdHandler) updateSpinnerMsg(ts *taskStatus) {
+func (h *CmdHandler) updateSpinnerMsg(ts *TaskStatus) {
 	if ts.error != nil {
 		h.spinner.Suffix = " " + ts.error.Error()
 	} else {
@@ -437,6 +525,10 @@ func (h *CmdHandler) SetPrompt(newPrompt string, mascot string) {
 	h.rl.SetPrompt(FormatPrompt(newPrompt, mascot))
 }
 
+func (h *CmdHandler) RefreshPrompt() {
+	h.rl.Refresh()
+}
+
 func (h *CmdHandler) UpdatePromptEnv() {
 	def := h.appCfg.GetPrompt()
 	h.rl.SetPrompt(FormatPrompt(def, ""))
@@ -488,6 +580,44 @@ func (h *CmdHandler) Repl(prompt string, mascot string) {
 	}
 }
 
+func (handler *CmdHandler) InjectIntoReg() {
+	if handler.cmdRegistry == nil {
+		panic("injection failed, handler registery not initialized")
+	}
+	handler.injectIntoCmds(handler.cmdRegistry.cmds)
+}
+
+func (handler *CmdHandler) injectIntoCmds(reg map[string]Cmd) {
+	for _, cmd := range reg {
+		cmd.setHandler(handler)
+		subCmds := cmd.GetSubCmds()
+		if len(subCmds) > 0 {
+			handler.injectIntoCmds(subCmds)
+		}
+	}
+}
+
+func (hdl *CmdHandler) RegisterListener(
+	key rune,
+	action ListernerAction,
+	fn readline.FuncKeypressHandler,
+) {
+	hdl.listeners[action] = &KeyListener{
+		key:     key,
+		handler: fn,
+	}
+}
+
+func (hdl *CmdHandler) ActivateListeners() {
+	for _, lsnr := range hdl.listeners {
+		rlCfg := hdl.rl.Config
+		if rlCfg.KeyListeners == nil {
+			rlCfg.KeyListeners = make(map[rune]readline.FuncKeypressHandler)
+		}
+		rlCfg.KeyListeners[lsnr.key] = lsnr.handler
+	}
+}
+
 func isLikeAVariable(segment string) bool {
 	return strings.HasPrefix(segment, "{{")
 }
@@ -504,21 +634,4 @@ func FormatPrompt(promptTxt string, mascot string) string {
 
 	env := config.GetEnvManager().GetActiveEnvName()
 	return fmt.Sprintf("%s (%s) %s>", promptTxt, env, mascot)
-}
-
-func (handler *CmdHandler) InjectIntoReg() {
-	if handler.cmdRegistry == nil {
-		panic("injection failed, handler registery not initialized")
-	}
-	handler.injectIntoCmds(handler.cmdRegistry.cmds)
-}
-
-func (handler *CmdHandler) injectIntoCmds(reg map[string]Cmd) {
-	for _, cmd := range reg {
-		cmd.setHandler(handler)
-		subCmds := cmd.GetSubCmds()
-		if len(subCmds) > 0 {
-			handler.injectIntoCmds(subCmds)
-		}
-	}
 }

@@ -28,7 +28,6 @@ func (s *CmdSend) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 	}
 
 	if req, err := draft.Finalize(); err != nil {
-		fmt.Println("errored out draft")
 		t.SetError(err)
 		updateChan <- (*t)
 	} else {

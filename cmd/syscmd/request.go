@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/nodding-noddy/repl-reqs/cmd"
 	"github.com/nodding-noddy/repl-reqs/config"
@@ -36,6 +35,10 @@ const (
 	CONNECT HTTPMethod = http.MethodConnect
 	OPTIONS HTTPMethod = http.MethodOptions
 	TRACE   HTTPMethod = http.MethodTrace
+)
+
+const (
+	ActionCycleReq = "cycle_requests"
 )
 
 type ReqMgrAware interface {
@@ -142,20 +145,36 @@ func InitNetCmds(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
 		return err
 	}
 	injectReqMgr(hdlr, mgr)
+	registerListeners(hdlr, mgr)
 	return nil
+}
+
+func registerListeners(hdlr *cmd.CmdHandler, mgr *network.RequestManager) {
+	hdlr.RegisterListener(0x10, ActionCycleReq, func() bool {
+		ctxId := hdlr.GetDefaultCtx().Value(cmd.CmdCtxIdKey)
+		if id, ok := ctxId.(string); ok {
+			req, _ := mgr.CycleRequests(string(id))
+			// currDraft := mgr.PeakRequestDraft(string(id))
+			if req != nil {
+				hdlr.SetPrompt(req.HttpRequest.URL.String(), "")
+				hdlr.RefreshPrompt()
+			}
+		}
+		return false
+	})
 }
 
 func injectReqMgr(hdlr *cmd.CmdHandler, mgr *network.RequestManager) {
 	for _, c := range hdlr.GetCmdRegistry().GetAllCmds() {
-    if c == nil {
-      continue
-    }
+		if c == nil {
+			continue
+		}
 		if rmAware, ok := c.(ReqMgrAware); ok {
 			rmAware.SetReqMgr(mgr)
 		}
-    if subCmds := c.GetSubCmds(); subCmds != nil {
-      injectReqMgrIntoSubCmds(subCmds, mgr)
-    }
+		if subCmds := c.GetSubCmds(); subCmds != nil {
+			injectReqMgrIntoSubCmds(subCmds, mgr)
+		}
 	}
 }
 
@@ -429,72 +448,76 @@ func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
 func (rc *ReqCmd) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 	tokens := cmdCtx.ExpandedTokens
 	hdlr := rc.GetCmdHandler()
-	uChan := hdlr.GetUpdateChan()
-	t := rc.GetTaskStatus()
+	taskUpdate := hdlr.GetUpdateChan()
+	taskStatus := rc.GetTaskStatus()
 
 	cmdParams, err := rc.getCmdParams(tokens)
 	if err != nil {
-		t.SetError(err)
-		uChan <- (*t)
+		taskStatus.SetError(err)
+		taskUpdate <- (*taskStatus)
 		return
 	}
 
 	req, err := rc.buildRequest(cmdParams)
 	if err != nil {
-		t.SetError(err)
-		uChan <- (*t)
+		taskStatus.SetError(err)
+		taskUpdate <- (*taskStatus)
 		return
 	}
+
 	rc.MakeRequest(req)
 }
 
 func (rc *ReqCmd) MakeRequest(req *http.Request) {
-	t := rc.GetTaskStatus()
-	uChan := rc.GetCmdHandler().GetUpdateChan()
-	_, updateChan, err := rc.Mgr.MakeRequest(req)
+	taskStatus := rc.GetTaskStatus()
+	taskUpdate := rc.GetCmdHandler().GetUpdateChan()
+	_, netUpdate, err := rc.Mgr.MakeRequest(req)
+
 	if err != nil {
-		t.SetError(err)
-		uChan <- (*t)
+		taskStatus.SetError(err)
+		taskUpdate <- (*taskStatus)
 		return
 	}
 
-	up := <-updateChan
-	if up.Err() == nil {
-		defer up.Resp().Body.Close()
-
-		resp := make(map[string]any)
-		respBytes, err := io.ReadAll(up.Resp().Body)
-		if err != nil {
-			fmt.Println("failed to read response body")
-			log.Debug("failed to read response body", err.Error())
-			return
-		}
-		err = json.Unmarshal(respBytes, &resp)
-		if err != nil {
-			fmt.Println("failed to process response content", err, string(respBytes))
-			log.Debug("failed to unmarshal response body", err.Error())
-			return
-		}
-
-		t.SetResult(up.Resp())
-		t.SetOutput(getFromattedResp(resp) + "\n" + up.Resp().Status)
+	result := <-netUpdate
+	if result.Err() == nil {
+		rc.handleSuccessfulResponse(taskStatus, result)
 	} else {
-		t.SetError(up.Err())
-		t.SetOutput(up.Err().Error())
+		taskStatus.SetError(result.Err())
+		taskStatus.SetOutput(result.Err().Error())
 	}
-	t.SetDone(true)
-	uChan <- (*t)
+	taskStatus.SetDone(true)
+	taskUpdate <- (*taskStatus)
 }
 
-func initialiseSpinner() {
-	S = spinner.New(spinner.CharSets[43], 100*time.Millisecond)
-	S.Start()
-	go func() {
-		<-StopSpinnerChannel
-		if S.Active() {
-			S.Stop()
-		}
-	}()
+func (rc *ReqCmd) readAndUnmarshalResponse(resp *http.Response, target map[string]any) error {
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	err = json.Unmarshal(respBytes, &target)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal JSON response: %w", err)
+	}
+
+	return nil
+}
+
+func (rc *ReqCmd) handleSuccessfulResponse(taskStatus *cmd.TaskStatus, result network.Update) {
+	defer result.Resp().Body.Close()
+
+	respMap := make(map[string]any)
+
+	err := rc.readAndUnmarshalResponse(result.Resp(), respMap)
+	if err != nil {
+		taskStatus.SetError(err)
+    taskStatus.SetOutput(err.Error() + "\n" + result.Resp().Status)
+		return
+	}
+
+	taskStatus.SetResult(result.Resp())
+	taskStatus.SetOutput(getFromattedResp(respMap) + "\n" + result.Resp().Status)
 }
 
 func rgbToAnsiEscapeCode(r, g, b uint8) string {
