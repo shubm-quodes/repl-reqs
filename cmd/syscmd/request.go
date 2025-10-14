@@ -512,7 +512,7 @@ func (rc *ReqCmd) handleSuccessfulResponse(taskStatus *cmd.TaskStatus, result ne
 	err := rc.readAndUnmarshalResponse(result.Resp(), respMap)
 	if err != nil {
 		taskStatus.SetError(err)
-    taskStatus.SetOutput(err.Error() + "\n" + result.Resp().Status)
+    taskStatus.SetOutput(err.Error() + "\n\n" + result.Resp().Status)
 		return
 	}
 

@@ -13,9 +13,9 @@ import (
 )
 
 // Loads and initializes configuration parameters based on user supplied flags.
-func Initialize(flags *Flags) *AppConfig {
+func Initialize(flags *Flags) *AppCfg {
 	log.SetDebug(flags.enableDebugging)
-	appCfg = &AppConfig{}
+	appCfg = NewAppCfg()
 	appCfg.DirPath = flags.configPath
 	appCfg.File = path.Join(flags.configPath, "config.json")
 	appCfg.HistoryFile = path.Join(flags.configPath, "history")
@@ -40,7 +40,7 @@ func getReplEditor() string {
 	return envEditor
 }
 
-func GetShellCfg(cfg *AppConfig) *readline.Config {
+func GetShellCfg(cfg *AppCfg) *readline.Config {
 	return &readline.Config{
 		Prompt:            cfg.prompt,
 		HistoryFile:       cfg.HistoryFile,
@@ -86,7 +86,7 @@ func getDefaultEditor() string {
 }
 
 // Creates a configuration template/boilerplate along with the required files
-func (c *AppConfig) initializeCfgTemplate() {
+func (c *AppCfg) initializeCfgTemplate() {
 	if util.FileDoesNotExist(c.DirPath) {
 		os.Mkdir(c.DirPath, 0700)
 	}
@@ -124,7 +124,7 @@ func writeContents(file *os.File, contents string) error {
 	return nil
 }
 
-func (c *AppConfig) isCfgTemplateExists() bool {
+func (c *AppCfg) isCfgTemplateExists() bool {
 	return !slices.ContainsFunc([]string{
 		c.DirPath,
 		c.File,
@@ -132,7 +132,7 @@ func (c *AppConfig) isCfgTemplateExists() bool {
 	}, util.FileDoesNotExist)
 }
 
-func (c *AppConfig) getConfFilePath() string {
+func (c *AppCfg) getConfFilePath() string {
 	return path.Join(getConfDirPath(c.DirPath), "conf.json")
 }
 

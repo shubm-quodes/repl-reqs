@@ -38,7 +38,7 @@ type KeyListener struct {
 type KeyListenerRegistry map[ListernerAction]*KeyListener
 
 type CmdHandler struct {
-	appCfg             *config.AppConfig
+	appCfg             *config.AppCfg
 	cmdRegistry        *CmdRegistry
 	listeners          KeyListenerRegistry
 	rl                 *readline.Instance
@@ -59,7 +59,7 @@ type CmdHandler struct {
 }
 
 func NewCmdHandler(
-	appCfg *config.AppConfig,
+	appCfg *config.AppCfg,
 	rlCfg *readline.Config,
 	reg *CmdRegistry,
 ) (*CmdHandler, error) {
@@ -127,7 +127,7 @@ func (h *CmdHandler) GetUpdateChan() chan<- TaskStatus {
 	return h.taskUpdates
 }
 
-func (h *CmdHandler) GetAppCfg() *config.AppConfig {
+func (h *CmdHandler) GetAppCfg() *config.AppCfg {
 	return h.appCfg
 }
 
@@ -372,11 +372,12 @@ func (h *CmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
 
 	if task.error != nil {
 		h.spinner.Stop()
+    fmt.Println("❌ Task failed\n")
     msg := task.error.Error()
     if task.output != "" {
       msg = task.output
     }
-		color.Red(msg)
+		color.HiRed(msg)
 		h.rl.Refresh()
 	}
 }
@@ -513,15 +514,6 @@ func (h *CmdHandler) PlaySequence(name string) error {
 }
 
 func (h *CmdHandler) SetPrompt(newPrompt string, mascot string) {
-	if strings.Trim(newPrompt, " ") == "" {
-		return
-	}
-
-	stripped := util.StripAnsi(newPrompt)
-	if len(stripped) > 20 {
-		newPrompt = "..." + newPrompt[len(stripped)-20:]
-	}
-
 	h.rl.SetPrompt(FormatPrompt(newPrompt, mascot))
 }
 

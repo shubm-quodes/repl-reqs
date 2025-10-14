@@ -11,6 +11,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/nodding-noddy/repl-reqs/cmd"
 	c "github.com/nodding-noddy/repl-reqs/config"
+	"github.com/nodding-noddy/repl-reqs/network"
 	"github.com/nodding-noddy/repl-reqs/util"
 )
 
@@ -93,6 +94,7 @@ func (ch *CmdHeader) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	reqDraft.SetHeader(key, val)
 	return ctx, nil
 }
+
 func (u *CmdURL) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	if u.Mgr == nil {
 		return cmdCtx.Ctx, errors.New("failed to set url, manager unavailable")
@@ -100,18 +102,16 @@ func (u *CmdURL) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	if len(cmdCtx.ExpandedTokens) == 0 {
 		return cmdCtx.Ctx, errors.New("please specify url :/")
 	}
+
 	url := cmdCtx.ExpandedTokens[0]
-	rMgr := u.Mgr
-	draft := rMgr.PeakRequestDraft(cmdCtx.ID())
+	draft := u.Mgr.PeakRequestDraft(cmdCtx.ID())
+
 	if draft != nil {
 		draft.SetUrl(url)
-		prompt := url
-		if draft.GetMethod() != "" {
-			prompt = fmt.Sprintf("%s [%s]", url, draft.GetMethod())
-		}
-		u.GetCmdHandler().SetPrompt(prompt, "")
+		setReqDraftPrompt(u.GetCmdHandler(), draft)
 		return cmdCtx.Ctx, nil
 	}
+
 	return cmdCtx.Ctx, errors.New("no request to draft")
 }
 
@@ -159,20 +159,19 @@ func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	if len(tokens) == 0 {
 		return ctx, errors.New("please specify httpverb")
 	}
+
 	httpVerb := tokens[0]
 	if !isValidHttpVerb(HTTPMethod(httpVerb)) {
 		return ctx, fmt.Errorf(`invalid httpVerb "%s"`, httpVerb)
 	}
+
 	draft := chv.Mgr.PeakRequestDraft(cmdCtx.ID())
 	if draft == nil {
 		return ctx, errors.New("request draft not found")
 	}
-	url := draft.SetMethod(httpVerb).
-		GetUrl()
-	if url != "" {
-		prompt := fmt.Sprintf("%s [%s]", color.MagentaString(url), color.GreenString(httpVerb))
-		chv.GetCmdHandler().SetPrompt(prompt, "")
-	}
+
+	draft.SetMethod(httpVerb)
+	setReqDraftPrompt(chv.GetCmdHandler(), draft)
 	return ctx, nil
 }
 
@@ -241,4 +240,28 @@ func (cm *CmdMascot) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	h.SetPrompt(prompt, mascot)
 
 	return ctx, nil
+}
+
+func setReqDraftPrompt(hdlr *cmd.CmdHandler, draft *network.RequestDraft) {
+	var (
+		prompt string
+		url    = draft.GetUrl()
+		cfg    = hdlr.GetAppCfg()
+	)
+
+	if cfg.TruncatePrompt() && len(url) > int(cfg.MaxPromptChars()) {
+		prompt = color.HiYellowString("..." + url[len(url)-20:])
+	} else {
+		prompt = color.HiYellowString(url)
+	}
+
+	if draft.GetMethod() != "" {
+		prompt = fmt.Sprintf(
+			"%s [%s]",
+			prompt,
+			color.GreenString(draft.GetMethod()),
+		)
+	}
+
+	hdlr.SetPrompt(prompt, "")
 }
