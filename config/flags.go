@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/nodding-noddy/repl-reqs/log"
 )
 
 // Represents values for the available CLI flags that correspond to configuration parameters.
-type Flags struct {
+type FlagVal struct {
 	enableDebugging bool
 	showVersion     bool
 	enableVimMode   bool
@@ -15,27 +17,22 @@ type Flags struct {
 }
 
 // Processes the provided flags.
-func (f *Flags) Process() {
+func (f *FlagVal) Process() {
 	if f.showVersion {
 		fmt.Println("Running version 0.1.1 Beta")
 		os.Exit(0)
 	}
-	if f.enableDebugging {
-		//TODO Do something here to enable debug logs
-	}
-	if f.configPath == "" {
-		f.configPath = GetDefConfDirPath()
-	}
+	log.SetDebug(f.enableDebugging)
 }
 
 // Initialize flags alongside their default values
-func InitializeFlags() (f *Flags) {
-	f = &Flags{}
-	flag.BoolVar(&f.enableDebugging, "enable-debugging", false, "Enable debugging logs")
-	flag.BoolVar(&f.showVersion, "v", false, "Show version information")
-	flag.BoolVar(&f.enableVimMode, "vim-mode", false, "Enable vim mode")
+func InitializeFlags() (fv *FlagVal) {
+	fv = &FlagVal{}
+	flag.BoolVar(&fv.enableDebugging, "enable-debugging", false, "Enable debugging logs")
+	flag.BoolVar(&fv.showVersion, "v", false, "Show version information")
+	flag.BoolVar(&fv.enableVimMode, "vim-mode", false, "Enable vim mode")
 	flag.StringVar(
-		&f.configPath,
+		&fv.configPath,
 		"c",
 		GetDefConfDirPath(),
 		"Path for custom configuration",

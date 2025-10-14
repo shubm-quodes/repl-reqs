@@ -367,16 +367,16 @@ func (h *CmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
 		h.spinner.Stop()
 		fmt.Println("✅ Task completed\n", task.output)
 		h.rl.Refresh()
-    return
+		return
 	}
 
 	if task.error != nil {
 		h.spinner.Stop()
-    fmt.Println("❌ Task failed\n")
-    msg := task.error.Error()
-    if task.output != "" {
-      msg = task.output
-    }
+		fmt.Println("❌ Task failed\n")
+		msg := task.error.Error()
+		if task.output != "" {
+			msg = task.output
+		}
 		color.HiRed(msg)
 		h.rl.Refresh()
 	}
@@ -544,7 +544,7 @@ func (h *CmdHandler) ExitCmdMode() (quitShell bool) {
 	return
 }
 
-func (h *CmdHandler) Repl(prompt string, mascot string) {
+func (h *CmdHandler) repl() {
 	if h.rl == nil {
 		panic("shell not assigned on handler")
 	}
@@ -572,41 +572,47 @@ func (h *CmdHandler) Repl(prompt string, mascot string) {
 	}
 }
 
-func (handler *CmdHandler) InjectIntoReg() {
-	if handler.cmdRegistry == nil {
-		panic("injection failed, handler registery not initialized")
-	}
-	handler.injectIntoCmds(handler.cmdRegistry.cmds)
-}
-
-func (handler *CmdHandler) injectIntoCmds(reg map[string]Cmd) {
+func (h *CmdHandler) injectIntoCmds(reg map[string]Cmd) {
 	for _, cmd := range reg {
-		cmd.setHandler(handler)
+		cmd.setHandler(h)
 		subCmds := cmd.GetSubCmds()
 		if len(subCmds) > 0 {
-			handler.injectIntoCmds(subCmds)
+			h.injectIntoCmds(subCmds)
 		}
 	}
 }
 
-func (hdl *CmdHandler) RegisterListener(
-	key rune,
-	action ListernerAction,
-	fn readline.FuncKeypressHandler,
-) {
-	hdl.listeners[action] = &KeyListener{
-		key:     key,
-		handler: fn,
-	}
-}
-
-func (hdl *CmdHandler) ActivateListeners() {
-	for _, lsnr := range hdl.listeners {
-		rlCfg := hdl.rl.Config
+func (h *CmdHandler) activateListeners() {
+	for _, lsnr := range h.listeners {
+		rlCfg := h.rl.Config
 		if rlCfg.KeyListeners == nil {
 			rlCfg.KeyListeners = make(map[rune]readline.FuncKeypressHandler)
 		}
 		rlCfg.KeyListeners[lsnr.key] = lsnr.handler
+	}
+}
+
+func (h *CmdHandler) Bootstrap() {
+	h.injectIntoReg()
+	h.activateListeners()
+	h.repl()
+}
+
+func (h *CmdHandler) injectIntoReg() {
+	if h.cmdRegistry == nil {
+		panic("injection failed, handler registery not initialized")
+	}
+	h.injectIntoCmds(h.cmdRegistry.cmds)
+}
+
+func (h *CmdHandler) RegisterListener(
+	key rune,
+	action ListernerAction,
+	fn readline.FuncKeypressHandler,
+) {
+	h.listeners[action] = &KeyListener{
+		key:     key,
+		handler: fn,
 	}
 }
 
