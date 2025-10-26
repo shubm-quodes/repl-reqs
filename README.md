@@ -1,1 +1,2 @@
-## Make HTTP requests from a repl with autocompletion 
+# real-reqs
+Draft and send HTTP requests using a 'Read Evaluate Print Loop'
