@@ -9,10 +9,10 @@ import (
 	"sync"
 
 	"github.com/fatih/color"
-	"github.com/nodding-noddy/repl-reqs/cmd"
-	c "github.com/nodding-noddy/repl-reqs/config"
-	"github.com/nodding-noddy/repl-reqs/network"
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/cmd"
+	c "github.com/shubm-quodes/repl-reqs/config"
+	"github.com/shubm-quodes/repl-reqs/network"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 const (

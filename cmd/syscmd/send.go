@@ -3,7 +3,7 @@ package syscmd
 import (
 	"fmt"
 
-	"github.com/nodding-noddy/repl-reqs/cmd"
+	"github.com/shubm-quodes/repl-reqs/cmd"
 )
 
 const (
@@ -23,6 +23,7 @@ func (s *CmdSend) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 		t.SetError(
 			fmt.Errorf("no drafts, start drafting requests using %s command", CmdDraftReqName),
 		)
+    t.SetDone(true)
 		updateChan <- (*t)
     return
 	}

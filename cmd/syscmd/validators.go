@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 // Validators

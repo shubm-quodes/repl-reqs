@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nodding-noddy/repl-reqs/cmd"
-	"github.com/nodding-noddy/repl-reqs/network"
+	"github.com/shubm-quodes/repl-reqs/cmd"
+	"github.com/shubm-quodes/repl-reqs/network"
 )
 
 const (

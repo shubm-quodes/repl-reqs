@@ -19,7 +19,9 @@ type CmdCtx struct {
 type Cmd interface {
 	Name() string
 	Desc() string
+	GetFullyQualifiedName() string
 	setHandler(*CmdHandler)
+	SetParent(Cmd)
 	GetCmdHandler() *CmdHandler
 	GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int)
 	GetSubCmds() SubCmd
@@ -36,6 +38,7 @@ type BaseCmd struct {
 	Name_      string
 	Desc_      string
 	SubCmds    map[string]Cmd
+	parent     Cmd
 	handler    *CmdHandler
 	taskStatus *TaskStatus
 }
@@ -62,20 +65,20 @@ func (c *BaseCmd) Desc() string {
 	return c.Desc_
 }
 
+func (c *BaseCmd) GetFullyQualifiedName() string {
+	if c.parent == nil {
+		return c.Name()
+	}
+
+	return c.parent.GetFullyQualifiedName() + " " + c.Name()
+}
+
 func (c *BaseCmd) GetSubCmds() SubCmd {
 	return c.SubCmds
 }
 
 func (c *BaseCmd) GetCmdHandler() *CmdHandler {
 	return c.handler
-}
-
-func (b *BaseCmd) AddSubCmd(cmd Cmd) Cmd {
-	if b.SubCmds == nil {
-		b.SubCmds = make(map[string]Cmd)
-	}
-	b.SubCmds[cmd.Name()] = cmd
-	return b
 }
 
 func (b *BaseCmd) GetSubCmdList() []string {
@@ -92,6 +95,19 @@ func (b *BaseCmd) GetTaskStatus() *TaskStatus {
 
 func (b *BaseCmd) SetTaskStatus(t *TaskStatus) {
 	b.taskStatus = t
+}
+
+func (b *BaseCmd) SetParent(parent Cmd) {
+	b.parent = parent
+}
+
+func (b *BaseCmd) AddSubCmd(cmd Cmd) Cmd {
+	if b.SubCmds == nil {
+		b.SubCmds = make(map[string]Cmd)
+	}
+	b.SubCmds[cmd.Name()] = cmd
+  cmd.SetParent(b)
+	return b
 }
 
 func Walk(cmd Cmd, tokens [][]rune) (remainingTkns [][]rune, finalCmd Cmd) {
@@ -167,10 +183,10 @@ func (c *BaseCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 
 // Just a default Execute method if no args or an invalid sub cmd gets provided
 func (c *BaseCmd) Execute(cmdCtx *CmdCtx) (context.Context, error) {
-  hdlr := c.GetCmdHandler()
-  if hdlr.GetCurrentCmdMode() != c {
-    hdlr.PushCmdMode(c.Name_, c)
-  }
+	hdlr := c.GetCmdHandler()
+	if hdlr.GetCurrentCmdMode() != c {
+		hdlr.PushCmdMode(c.Name_, c)
+	}
 	return cmdCtx.Ctx, nil
 }
 
@@ -299,4 +315,3 @@ func (c *CmdCtx) ID() string {
 	id, _ := v.(string)
 	return string(id)
 }
-

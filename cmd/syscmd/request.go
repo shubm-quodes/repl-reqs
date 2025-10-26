@@ -10,11 +10,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/nodding-noddy/repl-reqs/cmd"
-	"github.com/nodding-noddy/repl-reqs/config"
-	"github.com/nodding-noddy/repl-reqs/log"
-	"github.com/nodding-noddy/repl-reqs/network"
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/cmd"
+	"github.com/shubm-quodes/repl-reqs/config"
+	"github.com/shubm-quodes/repl-reqs/log"
+	"github.com/shubm-quodes/repl-reqs/network"
+	"github.com/shubm-quodes/repl-reqs/util"
 
 	"github.com/alecthomas/chroma"
 	"github.com/alecthomas/chroma/lexers"

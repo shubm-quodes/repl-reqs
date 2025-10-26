@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,8 +13,8 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
-	"github.com/nodding-noddy/repl-reqs/config"
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/config"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 type CmdMode struct {
@@ -64,17 +65,15 @@ func NewCmdHandler(
 	rlCfg *readline.Config,
 	reg *CmdRegistry,
 ) (*CmdHandler, error) {
-	defaultCtx := context.Background()
-	defaultCtx = context.WithValue(defaultCtx, CmdCtxIdKey, uuid.NewString())
 	cmh := &CmdHandler{
-		defaultCtx:   defaultCtx,
+		defaultCtx:   context.WithValue(context.Background(), CmdCtxIdKey, uuid.NewString()),
 		appCfg:       appCfg,
 		modes:        make([]*CmdMode, 0),
 		listeners:    make(KeyListenerRegistry),
 		taskUpdates:  make(chan TaskStatus),
 		fgTaskIdChan: make(chan string),
 		bgTaskIdChan: make(chan string),
-		tasks:        map[string]*TaskStatus{},
+		tasks:        make(map[string]*TaskStatus),
 		cmdRegistry:  reg,
 		spinner:      spinner.New(spinner.CharSets[14], 100*time.Millisecond),
 	}
@@ -82,7 +81,7 @@ func NewCmdHandler(
 	rlCfg.KeyListeners = make(map[rune]readline.FuncKeypressHandler)
 	rlCfg.KeyListeners[0x06] = func() bool {
 		if cmh.currFgTaskId == "" {
-			cmh.AttemptToBringLastBgToFg()
+			cmh.AttemptToBringLastBgTaskToFg()
 		} else {
 			cmh.bgTaskIdChan <- cmh.currFgTaskId
 		}
@@ -104,6 +103,22 @@ func newCmdCtx(ctx context.Context, tokens []string) *CmdCtx {
 		Ctx:       ctx,
 		RawTokens: tokens,
 	}
+}
+
+func (h *CmdHandler) NewTaskStatus(message, cmd string) *TaskStatus {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	taskId := fmt.Sprintf("#%d", len(h.tasks)+1)
+	taskStatus := &TaskStatus{
+		id:        taskId,
+		message:   message,
+		cmd:       cmd,
+		createdAt: time.Now(),
+	}
+
+	h.tasks[taskId] = taskStatus
+	return taskStatus
 }
 
 func (h *CmdHandler) GetCmdRegistry() *CmdRegistry {
@@ -182,7 +197,8 @@ func (h *CmdHandler) Suggest(tokens [][]rune) ([][]rune, int) {
 
 	lastToken := string(tokens[len(tokens)-1])
 	if isLikeAVariable(lastToken) {
-		return h.SuggestVarNames(lastToken), len(lastToken) - 2
+    offset := len(lastToken[strings.LastIndex(lastToken, "{{"):])-2
+		return h.SuggestVarNames(lastToken), offset
 	}
 
 	mode := h.GetCurrentCmdMode()
@@ -248,23 +264,6 @@ func (h *CmdHandler) Do(line []rune, pos int) (suggestions [][]rune, offset int)
 	return suggestions, offset
 }
 
-// func (h *CmdHandler) HandleCmd(
-// 	ctx context.Context,
-// 	tokens []string,
-// ) (context.Context, error) {
-// 	if mode := h.GetCurrentCmdMode(); mode != nil {
-// 		return mode.execute(ctx, tokens)
-// 	}
-//
-// 	name := tokens[0]
-// 	cmd := h.GetCmdByName(name)
-// 	if cmd == nil {
-// 		return ctx, fmt.Errorf("invalid cmd '%s'"+"\n", name)
-// 	}
-//
-// 	return cmd.execute(ctx, tokens[1:])
-// }
-
 func (h *CmdHandler) HandleCmd(
 	ctx context.Context,
 	tokens []string,
@@ -303,8 +302,9 @@ func (h *CmdHandler) HandleAsyncCmd(
 	cmd AsyncCmd,
 	tokens []string,
 ) (context.Context, error) {
-	task := NewTaskStatus(TaskStatusInitiated)
+	task := h.NewTaskStatus(TaskStatusInitiated+" 🕙", cmd.GetFullyQualifiedName())
 	h.spinner.Start()
+	h.spinner.Suffix = task.message
 	h.taskUpdates <- *task
 
 	taskCtx, cancel := context.WithCancel(ctx)
@@ -340,7 +340,7 @@ func (h *CmdHandler) handleTaskUpdate(statusUpdate TaskStatus) {
 
 	task := h.findOrCreateTask(statusUpdate.id)
 	h.updateTaskStatus(task, statusUpdate)
-	h.handleTaskCompletionOrError(task)
+	h.handleTaskCompletionOrError(&statusUpdate)
 
 	if h.currFgTaskId != "" {
 		h.updateSpinnerMsg(task)
@@ -365,26 +365,49 @@ func (h *CmdHandler) updateTaskStatus(task *TaskStatus, update TaskStatus) {
 	task.done = update.done
 	task.result = update.result
 	task.output = update.output
+
+	if !task.done && task.error == nil {
+		h.spinner.Suffix = task.message
+	}
+}
+
+func (h *CmdHandler) resetTaskState() {
+	h.spinner.Stop()
+	h.currFgTaskId = ""
+	h.lastBgTaskId = ""
+}
+
+func (h *CmdHandler) handleSuccessTaskStatus(task *TaskStatus) {
+	h.resetTaskState()
+	fmt.Println("✅ Task completed\n", task.output)
+}
+
+func (h *CmdHandler) handleFailedTaskStatus(task *TaskStatus) {
+	h.resetTaskState()
+
+	fmt.Println("❌ Task failed\n")
+	msg := task.error.Error()
+
+	if task.output != "" {
+		msg = task.output
+	}
+
+	color.HiRed(msg)
 }
 
 func (h *CmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
-	if task.done && h.currFgTaskId == task.id && task.error == nil {
-		h.spinner.Stop()
-		fmt.Println("✅ Task completed\n", task.output)
-		h.rl.Refresh()
+	if !task.done && task.error == nil {
 		return
 	}
 
-	if task.error != nil {
-		h.spinner.Stop()
-		fmt.Println("❌ Task failed\n")
-		msg := task.error.Error()
-		if task.output != "" {
-			msg = task.output
+	if h.currFgTaskId == task.id {
+		if task.error == nil {
+			h.handleSuccessTaskStatus(task)
+		} else {
+			h.handleFailedTaskStatus(task)
 		}
-		color.HiRed(msg)
-		h.rl.Refresh()
 	}
+	h.rl.Refresh()
 }
 
 func (h *CmdHandler) listenForTaskUpdates() {
@@ -403,6 +426,37 @@ func (h *CmdHandler) listenForTaskUpdates() {
 		case h.lastBgTaskId = <-h.bgTaskIdChan:
 			h.sendTaskToBg()
 		}
+	}
+}
+
+func (h *CmdHandler) ListTasks() {
+	if len(h.tasks) == 0 {
+		fmt.Printf("nothing's running right now %s\n", "😴")
+		return
+	}
+
+	taskIds := make([]string, 0, len(h.tasks))
+	for id := range h.tasks {
+		taskIds = append(taskIds, id)
+	}
+
+	sort.Strings(taskIds)
+	fmt.Printf("%+v", taskIds)
+
+	fmt.Println("🕙 Tasks ~")
+	for _, taskId := range taskIds {
+		status := h.tasks[taskId]
+		formatStr := "\n%s %s ~ %s"
+		if status.error != nil {
+			formatStr = formatStr + "❌"
+		} else if status.done {
+			formatStr = formatStr + "✅"
+		} else {
+			formatStr = formatStr + "In progres...🏃"
+		}
+
+		fmt.Printf(formatStr+"\n", status.id, status.cmd, status.output)
+		fmt.Print("\n---------------------------------------------------\n")
 	}
 }
 
@@ -574,11 +628,11 @@ func (h *CmdHandler) RegisterListener(
 	}
 }
 
-func (h *CmdHandler) AttemptToBringLastBgToFg() {
+func (h *CmdHandler) AttemptToBringLastBgTaskToFg() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if h.currFgTaskId != "" {
+	if h.currFgTaskId != "" || h.lastBgTaskId == "" {
 		return
 	}
 	h.fgTaskIdChan <- h.lastBgTaskId
@@ -590,7 +644,7 @@ func (h *CmdHandler) GetDefaultCtxId() CmdCtxID {
 }
 
 func isLikeAVariable(segment string) bool {
-	return strings.HasPrefix(segment, "{{")
+	return strings.LastIndex(segment, "{{") != -1
 }
 
 func prependSpc(options *[][]rune) {

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 type Tracker interface {
