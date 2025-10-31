@@ -2,30 +2,21 @@ package cmd
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 const (
-  TaskStatusInitiated = "initiated"
+	TaskStatusInitiated = "initiated"
 )
 
 type TaskStatus struct {
 	id        string
+	cmd       string
 	message   string
 	error     error
 	done      bool
 	result    any
 	output    string
 	createdAt time.Time
-}
-
-func NewTaskStatus(message string) *TaskStatus {
-	return &TaskStatus{
-		id:        uuid.NewString(),
-		message:   message,
-		createdAt: time.Now(),
-	}
 }
 
 func (t TaskStatus) GetID() string {
@@ -53,7 +44,7 @@ func (t TaskStatus) GetCreatedAt() time.Time {
 }
 
 func (t *TaskStatus) GetOutput(out string) string {
-  return t.output
+	return t.output
 }
 
 func (t *TaskStatus) SetMessage(message string) {
@@ -77,5 +68,5 @@ func (t *TaskStatus) SetCreatedAt(createdAt time.Time) {
 }
 
 func (t *TaskStatus) SetOutput(out string) {
-  t.output = out
+	t.output = out
 }

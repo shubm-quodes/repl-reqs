@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nodding-noddy/repl-reqs/cmd"
-	"github.com/nodding-noddy/repl-reqs/cmd/syscmd"
-	"github.com/nodding-noddy/repl-reqs/config"
+	"github.com/shubm-quodes/repl-reqs/cmd"
+	"github.com/shubm-quodes/repl-reqs/cmd/syscmd"
+	"github.com/shubm-quodes/repl-reqs/config"
 )
 
 func main() {

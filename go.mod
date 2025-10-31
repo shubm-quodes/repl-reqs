@@ -1,4 +1,4 @@
-module github.com/nodding-noddy/repl-reqs
+module github.com/shubm-quodes/repl-reqs
 
 go 1.24.0
 

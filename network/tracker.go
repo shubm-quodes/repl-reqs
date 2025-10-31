@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nodding-noddy/repl-reqs/log"
+	"github.com/shubm-quodes/repl-reqs/log"
 )
 
 const (

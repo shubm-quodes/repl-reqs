@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 func GetEnvManager() *envManager {

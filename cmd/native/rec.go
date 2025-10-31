@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nodding-noddy/repl-reqs/cmd"
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/cmd"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 const (
@@ -46,7 +46,7 @@ func init() {
 	recCmdSubCmdRegistery["$save"] = save
 }
 
-func (r *CmdRec) Execute(cmdCtx *cmd.CmdContext) error {
+func (r *CmdRec) Execute(cmdCtx *cmd.CmdCtx) error {
   tokens := cmdCtx.ExpandedTokens
 	if len(tokens) == 0 {
 		return errors.New("please specify sequence name")

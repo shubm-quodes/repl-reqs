@@ -1,6 +1,6 @@
 package syscmd
 
-import "github.com/nodding-noddy/repl-reqs/cmd"
+import "github.com/shubm-quodes/repl-reqs/cmd"
 
 func RegisterCmds(reg *cmd.CmdRegistry) {
 	s := &setCmd{cmd.NewBaseCmd(CmdSetName, "")}
@@ -18,5 +18,9 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 	n := &draftReqCmd{NewBaseReqCmd(CmdDraftReqName)}
 	send := &CmdSend{ReqCmd: NewReqCmd(CmdSendName, nil)}
 
-	reg.RegisterCmd(s, n, send)
+	ls := &CmdLs{cmd.NewBaseCmd(CmdLsName, "")}
+	ls.AddSubCmd(&CmdLsVars{cmd.NewBaseCmd(CmdLsVarsName, "")}).
+		AddSubCmd(&CmdLsTasks{cmd.NewBaseCmd(CmdLsTasksName, "")})
+
+	reg.RegisterCmd(s, n, send, ls)
 }

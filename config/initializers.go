@@ -8,8 +8,8 @@ import (
 	"slices"
 
 	"github.com/chzyer/readline"
-	"github.com/nodding-noddy/repl-reqs/log"
-	"github.com/nodding-noddy/repl-reqs/util"
+	"github.com/shubm-quodes/repl-reqs/log"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 // Loads and initializes configuration parameters based on user supplied flags.

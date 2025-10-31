@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nodding-noddy/repl-reqs/log"
+	"github.com/shubm-quodes/repl-reqs/log"
 )
 
 // Represents values for the available CLI flags that correspond to configuration parameters.
