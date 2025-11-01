@@ -106,7 +106,7 @@ func (b *BaseCmd) AddSubCmd(cmd Cmd) Cmd {
 		b.SubCmds = make(map[string]Cmd)
 	}
 	b.SubCmds[cmd.Name()] = cmd
-  cmd.SetParent(b)
+	cmd.SetParent(b)
 	return b
 }
 

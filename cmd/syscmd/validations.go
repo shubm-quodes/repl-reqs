@@ -5,30 +5,26 @@ type Validation interface {
 	InitializeParams(map[string]any) Validation
 }
 
-type NumValidateable interface {
-}
-
-type GenericValidations struct {
-	Required *bool
-}
-
 type IntValidations struct {
-	GenericValidations
-	MinVal *int
-	MaxVal *int
+	Required *bool  `json:"required"`
+	Type     string `json:"type"`
+	MinVal   *int   `json:"minVal"`
+	MaxVal   *int   `json:"maxVal"`
 }
 
 type FloatValidations struct {
-	GenericValidations
-	MinVal *float64
-	MaxVal *float64
+	Required *bool    `json:"required"`
+	Type     string   `json:"type"`
+	MinVal   *float64 `json:"minVal"`
+	MaxVal   *float64 `json:"maxVal"`
 }
 
 type StrValidations struct {
-	GenericValidations
-	MinLength *int
-	MaxLength *int
-	regex     *string
+	Required  *bool   `json:"required"`
+	Type      string  `json:"type"`
+	MinLength *int    `json:"minLength"`
+	MaxLength *int    `json:"maxLength"`
+	Regex     *string `json:"regex"`
 }
 
 type IterableVld interface {
@@ -73,10 +69,10 @@ func (sv *StrValidations) InitializeParams(params map[string]interface{}) Valida
 	return sv
 }
 
-func (arr *ArrValidation) InitializeParams(params map[string]interface{}) Validation {
+func (arr ArrValidation) InitializeParams(params map[string]interface{}) Validation {
 	return arr
 }
 
-func (vld *ObjValidation) InitializeParams(params map[string]interface{}) Validation {
+func (vld ObjValidation) InitializeParams(params map[string]interface{}) Validation {
 	return nil
 }

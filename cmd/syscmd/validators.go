@@ -40,27 +40,27 @@ func (sv *StrValidations) validate(value string) (any, error) {
 		return nil, err
 	}
 
-  if sv.regex == nil {
+  if sv.Regex == nil {
     return value, nil
   }
 
-	if matched, err := regexp.MatchString(*sv.regex, value); !matched || err != nil {
+	if matched, err := regexp.MatchString(*sv.Regex, value); !matched || err != nil {
 		return nil, fmt.Errorf(
 			"%v: Provided string does not match the pattern %v",
-			value, sv.regex,
+			value, sv.Regex,
 		)
 	}
 	return value, nil
 }
 
-func (arVld *ArrValidation) validate(value string) (any, error) {
+func (arVld ArrValidation) validate(value string) (any, error) {
 	str := []byte(fmt.Sprintf(`{"arr": %s}`, value)) // Hehehehuhuhu, am I Evil?
 	var arrWrapper map[string]any
 	json.Unmarshal(str, &arrWrapper)
 	return arrWrapper["arr"], arVld.validateArr(arrWrapper["arr"].([]any))
 }
 
-func (objVlds *ObjValidation) validate(value string) (any, error) {
+func (objVlds ObjValidation) validate(value string) (any, error) {
 	var obj map[string]any
 	json.Unmarshal([]byte(value), &obj)
 	return obj, objVlds.validateObj(obj)
@@ -129,5 +129,4 @@ func validateNum[num util.Number](n, min, max *num) error {
 				n, min, max)
 		}
 	}
-	return nil
-}
+	return nil }

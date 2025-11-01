@@ -31,9 +31,11 @@ type RequestDraft struct {
 	Url         string            `json:"url"`
 	Method      HTTPMethod        `json:"method"`
 	Headers     map[string]string `json:"headers"`
-	queryParams map[string]string
-	payload     string
+	QueryParams map[string]string `json:"queryParams"`
+	Payload     string            `json:"payload"`
 }
+
+type FuncQueryParamHandler func(key, val string)
 
 func NewRequestDraft() *RequestDraft {
 	return &RequestDraft{
@@ -61,14 +63,14 @@ func (rd *RequestDraft) GetHeader(key string) string {
 }
 
 func (rd *RequestDraft) GetQueryParam(key string) string {
-	if rd.queryParams != nil {
-		return rd.queryParams[key]
+	if rd.QueryParams != nil {
+		return rd.QueryParams[key]
 	}
 	return ""
 }
 
 func (rd *RequestDraft) GetPayload() string {
-	return rd.payload
+	return rd.Payload
 }
 
 func (rd *RequestDraft) SetUrl(url string) *RequestDraft {
@@ -91,16 +93,16 @@ func (rd *RequestDraft) SetHeader(key, val string) *RequestDraft {
 }
 
 func (rd *RequestDraft) SetQueryParam(key, val string) *RequestDraft {
-	if rd.queryParams == nil {
-		rd.queryParams = make(map[string]string)
+	if rd.QueryParams == nil {
+		rd.QueryParams = make(map[string]string)
 	}
 
-	rd.queryParams[key] = val
+	rd.QueryParams[key] = val
 	return rd
 }
 
 func (rd *RequestDraft) SetPayload(payload string) *RequestDraft {
-	rd.payload = payload
+	rd.Payload = payload
 	return rd
 }
 
@@ -113,7 +115,7 @@ func (rd *RequestDraft) parseToHttpHeader() (http.Header, error) {
 }
 
 func (rd *RequestDraft) parseToUrlVals() (url.Values, error) {
-	result, err := rd.getExpandedKeyVals(rd.queryParams)
+	result, err := rd.getExpandedKeyVals(rd.QueryParams)
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +138,15 @@ func (rd *RequestDraft) getExpandedKeyVals(input map[string]string) (map[string]
 	}
 
 	return expandedKeyVals, nil
+}
+
+func (d *RequestDraft) IterateQueryParams(handler FuncQueryParamHandler) {
+	if d.QueryParams == nil {
+		return
+	}
+	for key, value := range d.QueryParams {
+		handler(key, value)
+	}
 }
 
 func (rd *RequestDraft) Finalize() (*http.Request, error) {
@@ -168,7 +179,7 @@ func (rd *RequestDraft) Finalize() (*http.Request, error) {
 	}
 
 	req.URL.RawQuery = query.Encode()
-	parsedPayload, err := util.ReplaceStrPattern(rd.payload, config.VarPattern, lookups)
+	parsedPayload, err := util.ReplaceStrPattern(rd.Payload, config.VarPattern, lookups)
 	if err != nil {
 		return nil, err
 	}
