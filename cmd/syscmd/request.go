@@ -23,20 +23,6 @@ import (
 	"github.com/briandowns/spinner"
 )
 
-type HTTPMethod string
-
-const (
-	GET     HTTPMethod = http.MethodGet
-	HEAD    HTTPMethod = http.MethodHead
-	POST    HTTPMethod = http.MethodPost
-	PUT     HTTPMethod = http.MethodPut
-	PATCH   HTTPMethod = http.MethodPatch
-	DELETE  HTTPMethod = http.MethodDelete
-	CONNECT HTTPMethod = http.MethodConnect
-	OPTIONS HTTPMethod = http.MethodOptions
-	TRACE   HTTPMethod = http.MethodTrace
-)
-
 const (
 	ActionCycleReq = "cycle_requests"
 )
@@ -55,9 +41,9 @@ type ReqPropsSchema struct {
 }
 
 type ReqProps struct {
-	Url        string     `json:"url"`
-	HttpMethod HTTPMethod `json:"httpMethod"`
-	Headers    KeyValPair `json:"headers"`
+	Url        string             `json:"url"`
+	HttpMethod network.HTTPMethod `json:"httpMethod"`
+	Headers    KeyValPair         `json:"headers"`
 	*ReqPropsSchema
 	*network.RequestDraft
 }
@@ -69,7 +55,8 @@ type BaseReqCmd struct {
 
 type ReqCmd struct {
 	*BaseReqCmd
-	*ReqProps
+	*ReqPropsSchema
+	*network.RequestDraft
 }
 
 type ReqData struct {
@@ -106,13 +93,12 @@ func NewBaseReqCmd(name string) *BaseReqCmd {
 func NewReqCmd(name string, mgr *network.RequestManager) *ReqCmd {
 	return &ReqCmd{
 		BaseReqCmd: NewBaseReqCmd(name),
-		ReqProps: &ReqProps{
-			ReqPropsSchema: &ReqPropsSchema{
-				QueryParams: make(ValidationSchema),
-				UrlParams:   make(ValidationSchema),
-				Payload:     make(ValidationSchema),
-			},
+		ReqPropsSchema: &ReqPropsSchema{
+			QueryParams: make(ValidationSchema),
+			UrlParams:   make(ValidationSchema),
+			Payload:     make(ValidationSchema),
 		},
+		RequestDraft: &network.RequestDraft{},
 	}
 }
 
@@ -125,8 +111,8 @@ func (rc *ReqCmd) SetUrl(url string) *ReqCmd {
 	return rc
 }
 
-func (rc *ReqCmd) SetMethod(method HTTPMethod) *ReqCmd {
-	rc.HttpMethod = method
+func (rc *ReqCmd) SetMethod(method network.HTTPMethod) *ReqCmd {
+	rc.Method = method
 	return rc
 }
 
@@ -197,13 +183,13 @@ func parseRawReqCfg(
 ) error {
 	for _, req := range rawCfg.RawRequests {
 		var rawProps struct {
-			Cmd            string          `json:"cmd"`
-			Url            string          `json:"url"`
-			HttpMethod     HTTPMethod      `json:"httpMethod"`
-			Headers        KeyValPair      `json:"headers"`
-			RawQueryParams json.RawMessage `json:"queryParams"`
-			RawUrlParams   json.RawMessage `json:"urlParams"`
-			RawPayload     json.RawMessage `json:"payload"`
+			Cmd            string             `json:"cmd"`
+			Url            string             `json:"url"`
+			HttpMethod     network.HTTPMethod `json:"httpMethod"`
+			Headers        KeyValPair         `json:"headers"`
+			RawQueryParams json.RawMessage    `json:"queryParams"`
+			RawUrlParams   json.RawMessage    `json:"urlParams"`
+			RawPayload     json.RawMessage    `json:"payload"`
 		}
 		if err := json.Unmarshal(req, &rawProps); err != nil {
 			return err
@@ -229,15 +215,6 @@ func strMapToHttpHeader(m map[string]string) http.Header {
 		h[k] = []string{v}
 	}
 	return h
-}
-
-func isValidHttpVerb(verb HTTPMethod) bool {
-	switch verb {
-	case GET, HEAD, POST, PUT, PATCH, DELETE, CONNECT, OPTIONS, TRACE:
-		return true
-	default:
-		return false
-	}
 }
 
 func (r *ReqCmd) register(
@@ -324,19 +301,19 @@ func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
 	}
 
 	for key, value := range parsedParams {
-		if err := validate(key, value, rc.ReqProps.UrlParams, cmdParams.URL); err != nil {
+		if err := validate(key, value, rc.ReqPropsSchema.UrlParams, cmdParams.URL); err != nil {
 			return nil, err
 		}
 		if processedKeys[key] {
 			continue
 		}
-		if err := validate(key, value, rc.ReqProps.QueryParams, cmdParams.Query); err != nil {
+		if err := validate(key, value, rc.ReqPropsSchema.QueryParams, cmdParams.Query); err != nil {
 			return nil, err
 		}
 		if processedKeys[key] {
 			continue
 		}
-		if err := validate(key, value, rc.ReqProps.Payload, cmdParams.Payload); err != nil {
+		if err := validate(key, value, rc.ReqPropsSchema.Payload, cmdParams.Payload); err != nil {
 			return nil, err
 		}
 		if processedKeys[key] {
@@ -350,7 +327,8 @@ func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
 }
 
 func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
-	finalURL := rc.ReqProps.Url
+	draft := rc.RequestDraft
+	finalURL := draft.Url
 	for key, value := range cmdParams.URL {
 		finalURL = strings.Replace(finalURL, ":"+key, value, 1)
 	}
@@ -374,12 +352,12 @@ func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 		reqBody = bytes.NewReader(payloadBytes)
 	}
 
-	req, err := http.NewRequest(string(rc.HttpMethod), u.String(), reqBody)
+	req, err := http.NewRequest(string(draft.Method), u.String(), reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("error creating HTTP request: %w", err)
 	}
 
-	for key, value := range rc.ReqProps.Headers {
+	for key, value := range draft.Headers {
 		req.Header.Set(key, value)
 	}
 
@@ -423,7 +401,7 @@ func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 }
 
 func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
-	if rc.ReqProps == nil {
+	if rc.RequestDraft == nil {
 		return
 	}
 	params := []ValidationSchema{rc.QueryParams, rc.UrlParams, rc.Payload}
@@ -512,7 +490,7 @@ func (rc *ReqCmd) handleSuccessfulResponse(taskStatus *cmd.TaskStatus, result ne
 	err := rc.readAndUnmarshalResponse(result.Resp(), respMap)
 	if err != nil {
 		taskStatus.SetError(err)
-    taskStatus.SetOutput(err.Error() + "\n\n" + result.Resp().Status)
+		taskStatus.SetOutput(err.Error() + "\n\n" + result.Resp().Status)
 		return
 	}
 
