@@ -24,6 +24,79 @@ func OsIsUnixLike() bool {
 	return runtime.GOOS != "windows"
 }
 
+func ContainsRuneSlice(haystack [][]rune, needle []rune) bool {
+	for _, rSlice := range haystack {
+		if slices.Equal(rSlice, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func IntersectSlice[T comparable](sliceA, sliceB []T) []T {
+	aSet := make(map[T]struct{})
+	for _, item := range sliceA {
+		aSet[item] = struct{}{}
+	}
+
+	intersection := make([]T, 0)
+	added := make(map[T]struct{})
+
+	for _, item := range sliceB {
+		if _, existsInA := aSet[item]; existsInA {
+			if _, alreadyAdded := added[item]; !alreadyAdded {
+				intersection = append(intersection, item)
+				added[item] = struct{}{} // Mark as added
+			}
+		}
+	}
+
+	return intersection
+}
+
+func SymmetricDifference[T comparable](sliceA, sliceB []T) []T {
+	aSet := make(map[T]struct{})
+	bSet := make(map[T]struct{})
+	
+	for _, item := range sliceA {
+		aSet[item] = struct{}{}
+	}
+	for _, item := range sliceB {
+		bSet[item] = struct{}{}
+	}
+
+	symmetricDiff := make([]T, 0)
+	added := make(map[T]struct{}) 
+
+	for _, item := range sliceA {
+		if _, existsInB := bSet[item]; !existsInB {
+			if _, alreadyAdded := added[item]; !alreadyAdded {
+				symmetricDiff = append(symmetricDiff, item)
+				added[item] = struct{}{}
+			}
+		}
+	}
+
+	for _, item := range sliceB {
+		if _, existsInA := aSet[item]; !existsInA {
+			if _, alreadyAdded := added[item]; !alreadyAdded {
+				symmetricDiff = append(symmetricDiff, item)
+				added[item] = struct{}{}
+			}
+		}
+	}
+
+	return symmetricDiff
+}
+
+func RuneArrToStrArr(rSlices [][]rune) []string {
+	sSlices := make([]string, len(rSlices))
+	for i, rSlice := range rSlices {
+		sSlices[i] = string(rSlice)
+	}
+	return sSlices
+}
+
 func TrimRunesLeft(line []rune) []rune {
 	var nonSpaceIdx int
 	for idx, r := range line {
