@@ -161,7 +161,7 @@ func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	}
 
 	httpVerb := tokens[0]
-	if !isValidHttpVerb(HTTPMethod(httpVerb)) {
+	if !network.IsValidHttpVerb(network.HTTPMethod(httpVerb)) {
 		return ctx, fmt.Errorf(`invalid httpVerb "%s"`, httpVerb)
 	}
 
@@ -170,7 +170,7 @@ func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 		return ctx, errors.New("request draft not found")
 	}
 
-	draft.SetMethod(httpVerb)
+	draft.SetMethod(network.HTTPMethod(httpVerb))
 	setReqDraftPrompt(chv.GetCmdHandler(), draft)
 	return ctx, nil
 }
@@ -259,7 +259,7 @@ func setReqDraftPrompt(hdlr *cmd.CmdHandler, draft *network.RequestDraft) {
 		prompt = fmt.Sprintf(
 			"%s [%s]",
 			prompt,
-			color.GreenString(draft.GetMethod()),
+			color.GreenString(string(draft.GetMethod())),
 		)
 	}
 

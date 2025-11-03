@@ -12,11 +12,25 @@ import (
 	"github.com/shubm-quodes/repl-reqs/util"
 )
 
+type HTTPMethod string
+
+const (
+	GET     HTTPMethod = http.MethodGet
+	HEAD    HTTPMethod = http.MethodHead
+	POST    HTTPMethod = http.MethodPost
+	PUT     HTTPMethod = http.MethodPut
+	PATCH   HTTPMethod = http.MethodPatch
+	DELETE  HTTPMethod = http.MethodDelete
+	CONNECT HTTPMethod = http.MethodConnect
+	OPTIONS HTTPMethod = http.MethodOptions
+	TRACE   HTTPMethod = http.MethodTrace
+)
+
 type RequestDraft struct {
 	id          string
-	url         string
-	method      string
-	headers     map[string]string
+	Url         string            `json:"url"`
+	Method      HTTPMethod        `json:"method"`
+	Headers     map[string]string `json:"headers"`
 	queryParams map[string]string
 	payload     string
 }
@@ -32,16 +46,16 @@ func (rd *RequestDraft) GetId() string {
 }
 
 func (rd *RequestDraft) GetUrl() string {
-	return rd.url
+	return rd.Url
 }
 
-func (rd *RequestDraft) GetMethod() string {
-	return rd.method
+func (rd *RequestDraft) GetMethod() HTTPMethod {
+	return rd.Method
 }
 
 func (rd *RequestDraft) GetHeader(key string) string {
-	if rd.headers != nil {
-		return rd.headers[key]
+	if rd.Headers != nil {
+		return rd.Headers[key]
 	}
 	return ""
 }
@@ -58,21 +72,21 @@ func (rd *RequestDraft) GetPayload() string {
 }
 
 func (rd *RequestDraft) SetUrl(url string) *RequestDraft {
-	rd.url = url
+	rd.Url = url
 	return rd
 }
 
-func (rd *RequestDraft) SetMethod(method string) *RequestDraft {
-	rd.method = method
+func (rd *RequestDraft) SetMethod(method HTTPMethod) *RequestDraft {
+	rd.Method = method
 	return rd
 }
 
 func (rd *RequestDraft) SetHeader(key, val string) *RequestDraft {
-	if rd.headers == nil {
-		rd.headers = make(map[string]string)
+	if rd.Headers == nil {
+		rd.Headers = make(map[string]string)
 	}
 
-	rd.headers[key] = val
+	rd.Headers[key] = val
 	return rd
 }
 
@@ -91,7 +105,7 @@ func (rd *RequestDraft) SetPayload(payload string) *RequestDraft {
 }
 
 func (rd *RequestDraft) parseToHttpHeader() (http.Header, error) {
-	result, err := rd.getExpandedKeyVals(rd.headers)
+	result, err := rd.getExpandedKeyVals(rd.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -128,16 +142,16 @@ func (rd *RequestDraft) Finalize() (*http.Request, error) {
 	envMgr := config.GetEnvManager()
 	lookups := envMgr.GetActiveEnvVars()
 
-	if rd.url == "" || rd.method == "" {
+	if rd.Url == "" || rd.Method == "" {
 		return nil, errors.New("cannot finalize request draft, url and method not set")
 	}
 
-	expandedUrl, err := util.ReplaceStrPattern(rd.url, config.VarPattern, lookups)
+	expandedUrl, err := util.ReplaceStrPattern(rd.Url, config.VarPattern, lookups)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(rd.method, expandedUrl, nil)
+	req, err := http.NewRequest(string(rd.Method), expandedUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -169,4 +183,13 @@ func (rd *RequestDraft) Finalize() (*http.Request, error) {
 
 func (r *RequestDraft) GetKey() string {
 	return r.id
+}
+
+func IsValidHttpVerb(verb HTTPMethod) bool {
+	switch verb {
+	case GET, HEAD, POST, PUT, PATCH, DELETE, CONNECT, OPTIONS, TRACE:
+		return true
+	default:
+		return false
+	}
 }
