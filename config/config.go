@@ -31,7 +31,7 @@ type AppCfg struct {
 	mascot          string
 	BaseUrl         string
 	DirPath         string
-	File            string
+	file            string
 	DefaultEditor   string
 	HistoryFile     string
 	TempFiles       []string
@@ -70,6 +70,10 @@ func GetDefaultPrompt() string {
 
 func GetDefaultMascot() string {
 	return defaultMascot
+}
+
+func (ac *AppCfg) CfgFilePath() string {
+  return ac.file
 }
 
 func (ac *AppCfg) GetPrompt() string {

@@ -33,7 +33,7 @@ func (c *AppCfg) setBaseURL(conf map[string]any) {
 }
 
 func (c *AppCfg) loadCfg() {
-	fileContents, err := os.ReadFile(c.File)
+	fileContents, err := os.ReadFile(c.file)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to read config file: %s", err.Error())
 		os.Exit(1)

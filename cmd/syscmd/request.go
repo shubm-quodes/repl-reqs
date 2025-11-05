@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
@@ -265,8 +266,8 @@ func (rc *ReqCmd) initializeVlds(
 	rawUrlParams, rawQueryParams, rawPayload json.RawMessage,
 ) {
 	rc.UrlParams.initialize(rawUrlParams)
-	rc.QueryParams.initialize(rawQueryParams)
-	rc.Payload.initialize(rawPayload)
+	rc.ReqPropsSchema.QueryParams.initialize(rawQueryParams)
+	rc.ReqPropsSchema.Payload.initialize(rawPayload)
 }
 
 func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
@@ -404,7 +405,8 @@ func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
 	if rc.RequestDraft == nil {
 		return
 	}
-	params := []ValidationSchema{rc.QueryParams, rc.UrlParams, rc.Payload}
+	schema := rc.ReqPropsSchema
+	params := []ValidationSchema{schema.QueryParams, schema.UrlParams, schema.Payload}
 	criteria := &util.MatchCriteria[Validation]{
 		Search:     string(search),
 		SuffixWith: "=",
@@ -582,5 +584,196 @@ func getValidation(paramType string) (Validation, error) {
 	}
 }
 
+func (r *ReqCmd) PopulateSchemasFromDraft() {
+	if r.RequestDraft == nil {
+		return
+	}
+
+	if r.ReqPropsSchema == nil {
+		r.ReqPropsSchema = &ReqPropsSchema{
+			QueryParams: make(ValidationSchema),
+			Payload:     make(ValidationSchema),
+			UrlParams:   make(ValidationSchema),
+		}
+	}
+
+	r.populateQuerySchemaFromDraft()
+	r.ReqPropsSchema.Payload = populateSchemaFromJSONString(r.GetPayload())
+}
+
 func (req *ReqCmd) cleanup() {
 }
+
+func (r *ReqCmd) populateQuerySchemaFromDraft() {
+	schema := r.ReqPropsSchema
+	schema.QueryParams = make(ValidationSchema)
+
+	handlerFunc := func(key, value string) {
+		if _, err := strconv.Atoi(value); err == nil {
+			schema.QueryParams[key] = &IntValidations{Type: "int"}
+		} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+			schema.QueryParams[key] = &FloatValidations{Type: "float"}
+		} else {
+			schema.QueryParams[key] = &StrValidations{Type: "string"}
+		}
+	}
+
+	r.IterateQueryParams(handlerFunc)
+	schema.Payload = populateSchemaFromJSONString(r.RequestDraft.GetPayload())
+}
+
+func inferTypeSchema(value any) Validation {
+	if value == nil {
+		return &StrValidations{Type: "string"}
+	}
+
+	switch v := value.(type) {
+	case string:
+		return &StrValidations{Type: "string"}
+	case float64:
+		if v == float64(int64(v)) {
+			return &IntValidations{Type: "int"}
+		}
+		return &FloatValidations{Type: "float"}
+
+	case map[string]any:
+		objSchema := make(ObjValidation)
+		for key, subValue := range v {
+			objSchema[key] = inferTypeSchema(subValue)
+		}
+		return objSchema
+
+	case []any:
+		var arrSchema ArrValidation
+
+		if len(v) > 0 {
+			arrSchema = make(ArrValidation, len(v))
+			for idx, item := range v {
+				if item != nil {
+					arrSchema[idx] = inferTypeSchema(item)
+					break
+				}
+			}
+		}
+		return arrSchema
+
+	default:
+		return &StrValidations{}
+	}
+}
+
+func populateSchemaFromJSONString(jsonString string) ValidationSchema {
+	schema := make(ValidationSchema)
+	var payloadMap map[string]any
+
+	if jsonString == "" {
+		return schema
+	}
+
+	if err := json.Unmarshal([]byte(jsonString), &payloadMap); err != nil {
+		fmt.Printf("Error unmarshalling JSON: %v\n", err)
+		return schema
+	}
+
+	for key, value := range payloadMap {
+		schema[key] = inferTypeSchema(value)
+	}
+
+	return schema
+}
+
+func GetRawReqCfg() ([]byte, error) {
+	cfgFilePath := config.GetAppCfg().CfgFilePath()
+	return os.ReadFile(cfgFilePath)
+}
+
+func marshalReqCmdCfg(reqCmd *ReqCmd, cmd string) ([]byte, error) {
+	var reqCmdCfg struct {
+		HttpMethod   string                `json:"httpMethod"`
+		Cmd          string                `json:"cmd"`
+		Url          string                `json:"url"`
+		QueryParams  map[string]Validation `json:"queryParams"`
+		UrlParams    map[string]Validation `json:"urlParams"`
+		Payload      map[string]Validation `json:"payload"`
+		RequestDraft *network.RequestDraft `json:"requestDraft"`
+	}
+
+	reqCmdCfg.Cmd = cmd
+	reqCmdCfg.Url = reqCmd.Url
+	reqCmdCfg.HttpMethod = string(reqCmd.Method)
+	reqCmdCfg.QueryParams = reqCmd.ReqPropsSchema.QueryParams
+	reqCmdCfg.UrlParams = reqCmd.ReqPropsSchema.UrlParams
+	reqCmdCfg.Payload = reqCmd.ReqPropsSchema.Payload
+	reqCmdCfg.RequestDraft = reqCmd.RequestDraft
+
+	encodedJson, err := json.MarshalIndent(reqCmdCfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return encodedJson, nil
+}
+
+func SaveNewReqCmd(reqCmd *ReqCmd, cmd string) error {
+	encJsonCfg, err := marshalReqCmdCfg(reqCmd, cmd)
+	if err != nil {
+		return fmt.Errorf("failed to encode request config %w", err)
+	}
+	existingCfg, err := GetRawReqCfg()
+	if err != nil {
+		return fmt.Errorf("failed to get existing config %w", err)
+	}
+	var iCfg struct {
+		Requests []json.RawMessage `json:"requests"`
+	}
+
+	err = json.Unmarshal(existingCfg, &iCfg)
+	if err != nil {
+		return fmt.Errorf("invalid 'config.json' file: %w", err)
+	}
+
+	var fullCfg map[string]any
+	err = json.Unmarshal(existingCfg, &fullCfg)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal existin cfg: %w", err)
+	}
+
+	iCfg.Requests = append(iCfg.Requests, encJsonCfg)
+	fullCfg["requests"] = iCfg.Requests
+
+	finalCfg, err := json.MarshalIndent(fullCfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error marshalling req config json %w", err)
+	}
+
+	cfgFilePath := config.GetAppCfg().CfgFilePath()
+	if err := os.WriteFile(cfgFilePath, finalCfg, 0644); err != nil {
+		return fmt.Errorf("failed to update 'config.json' %w", err)
+	}
+
+	return nil
+}
+
+// func populateSchemaFromJSONString(jsonString string) ValidationSchema {
+// 	schema := make(ValidationSchema)
+// 	var payloadMap map[string]any
+//
+// 	if jsonString == "" || json.Unmarshal([]byte(jsonString), &payloadMap) != nil {
+// 		return schema
+// 	}
+//
+// 	for key, value := range payloadMap {
+// 		switch value.(type) {
+// 		case string:
+// 			schema[key] = &StrValidations{}
+// 		case int, float64:
+// 			if _, isInt := value.(int); isInt || float64(int(value.(float64))) == value.(float64) {
+// 				schema[key] = &IntValidations{}
+// 			} else {
+// 				schema[key] = &FloatValidations{}
+// 			}
+// 		default:
+// 			schema[key] = &StrValidations{}
+// 		}
+// 	}
+// 	return schema
+// }

@@ -16,7 +16,7 @@ import (
 func Initialize(flags *FlagVal) *AppCfg {
 	appCfg = NewAppCfg()
 	appCfg.DirPath = flags.configPath
-	appCfg.File = path.Join(flags.configPath, "config.json")
+	appCfg.file = path.Join(flags.configPath, "config.json")
 	appCfg.HistoryFile = path.Join(flags.configPath, "history")
 	appCfg.VimMode = flags.enableVimMode
 	appCfg.Load()
@@ -125,7 +125,7 @@ func writeContents(file *os.File, contents string) error {
 func (c *AppCfg) isCfgTemplateExists() bool {
 	return !slices.ContainsFunc([]string{
 		c.DirPath,
-		c.File,
+		c.file,
 		c.HistoryFile,
 	}, util.FileDoesNotExist)
 }
