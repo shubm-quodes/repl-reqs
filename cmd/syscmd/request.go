@@ -386,9 +386,6 @@ func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 	}
 
 	var search []rune
-	// if len(remainingTkns) == 0 {
-	// 	search = []rune{}
-	// } else {
 	if len(remainingTkns) > 0 {
 		lastToken := string(remainingTkns[len(remainingTkns)-1])
 		if parts := strings.SplitN(lastToken, "=", 2); len(parts) != 2 {
@@ -398,6 +395,15 @@ func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 
 	offset = len(search)
 	suggestions = rc.SuggestCmdParams(search)
+
+	if len(remainingTkns) > 0 {
+		symmetricDiff := util.SymmetricDifference(
+			util.RuneArrToStrArr(remainingTkns),
+			util.RuneArrToStrArr(suggestions),
+		)
+		suggestions = util.StrArrToRune(symmetricDiff)
+	}
+
 	return
 }
 
