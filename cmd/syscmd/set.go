@@ -76,7 +76,7 @@ type CmdMascot struct {
 	*cmd.BaseCmd
 }
 
-type setCmd struct {
+type CmdSet struct {
 	*cmd.BaseCmd
 }
 
@@ -119,7 +119,7 @@ func (cmh *CmdMultiHeaders) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error)
 	ctx := cmdCtx.Ctx
 	handler := cmh.GetCmdHandler()
 
-	if handler.GetCurrentCmdMode() != cmh {
+	if handler.GetCurrentModeCmd() != cmh {
 		cmh.activateMultiHeaderMode()
 		return ctx, nil
 	} else {
@@ -151,7 +151,7 @@ func (cmh *CmdMultiHeaders) setHeader(key, val string) error {
 
 func (cmh *CmdMultiHeaders) activateMultiHeaderMode() {
 	handler := cmh.GetCmdHandler() // here is says cmh.GetCmdHandler undefined
-	handler.PushCmdMode("$multi-headers", cmh)
+	handler.PushCmdMode("$multi-headers", cmh, false)
 }
 
 func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
@@ -242,7 +242,7 @@ func (cm *CmdMascot) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	return ctx, nil
 }
 
-func setReqDraftPrompt(hdlr *cmd.CmdHandler, draft *network.RequestDraft) {
+func setReqDraftPrompt(hdlr cmd.CmdHandler, draft *network.RequestDraft) {
 	var (
 		prompt string
 		url    = draft.GetUrl()

@@ -122,7 +122,7 @@ func (rc *ReqCmd) SetHeaders(headers KeyValPair) *ReqCmd {
 	return rc
 }
 
-func InitNetCmds(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
+func InitNetCmds(rawCfg config.RawCfg, hdlr *cmd.ReplCmdHandler) error {
 	mgr := network.NewRequestManager(
 		network.NewRequestTracker(),
 		nil,
@@ -136,12 +136,11 @@ func InitNetCmds(rawCfg config.RawCfg, hdlr *cmd.CmdHandler) error {
 	return nil
 }
 
-func registerListeners(hdlr *cmd.CmdHandler, mgr *network.RequestManager) {
+func registerListeners(hdlr *cmd.ReplCmdHandler, mgr *network.RequestManager) {
 	hdlr.RegisterListener(0x10, ActionCycleReq, func() bool {
 		ctxId := hdlr.GetDefaultCtx().Value(cmd.CmdCtxIdKey)
 		if id, ok := ctxId.(string); ok {
 			req, _ := mgr.CycleRequests(string(id))
-			// currDraft := mgr.PeakRequestDraft(string(id))
 			if req != nil {
 				hdlr.SetPrompt(req.HttpRequest.URL.String(), "")
 				hdlr.RefreshPrompt()
@@ -151,7 +150,7 @@ func registerListeners(hdlr *cmd.CmdHandler, mgr *network.RequestManager) {
 	})
 }
 
-func injectReqMgr(hdlr *cmd.CmdHandler, mgr *network.RequestManager) {
+func injectReqMgr(hdlr *cmd.ReplCmdHandler, mgr *network.RequestManager) {
 	for _, c := range hdlr.GetCmdRegistry().GetAllCmds() {
 		if c == nil {
 			continue
@@ -179,7 +178,7 @@ func injectReqMgrIntoSubCmds(reg map[string]cmd.Cmd, mgr *network.RequestManager
 
 func parseRawReqCfg(
 	rawCfg config.RawCfg,
-	hdlr *cmd.CmdHandler,
+	hdlr *cmd.ReplCmdHandler,
 	rMgr *network.RequestManager,
 ) error {
 	for _, req := range rawCfg.RawRequests {
@@ -220,7 +219,7 @@ func strMapToHttpHeader(m map[string]string) http.Header {
 
 func (r *ReqCmd) register(
 	cmdWithSubCmds string,
-	hdlr *cmd.CmdHandler,
+	hdlr cmd.CmdHandler,
 	rMgr *network.RequestManager,
 ) {
 	if strings.Trim(cmdWithSubCmds, " ") == "" {

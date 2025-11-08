@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -17,10 +18,43 @@ import (
 	"github.com/shubm-quodes/repl-reqs/util"
 )
 
+type Cmd interface {
+	Name() string
+
+	Desc() string
+
+	GetFullyQualifiedName() string
+
+	setHandler(CmdHandler)
+
+	SetParent(Cmd)
+
+	GetCmdHandler() CmdHandler
+
+	GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int)
+
+	GetSubCmds() SubCmd
+
+	AddSubCmd(cmd Cmd) Cmd
+
+	WalkTillLastSubCmd(tokens [][]rune) (remainingTkns [][]rune, c Cmd)
+
+	filterSuggestions(partial string, offset int) [][]rune
+
+	Execute(*CmdCtx) (context.Context, error)
+
+	SetTaskStatus(*TaskStatus)
+
+	GetTaskStatus() *TaskStatus
+
+	cleanup()
+}
+
 type CmdMode struct {
-	CmdName string
-	prompt  string
-	Cmd     Cmd
+	CmdName                  string
+	prompt                   string
+	Cmd                      Cmd
+	AllowRootCmdsWhileInMode bool
 }
 
 type Step struct {
@@ -38,34 +72,35 @@ type KeyListener struct {
 
 type KeyListenerRegistry map[ListernerAction]*KeyListener
 
-type CmdHandler struct {
-	appCfg             *config.AppCfg
-	cmdRegistry        *CmdRegistry
-	listeners          KeyListenerRegistry
-	rl                 *readline.Instance
-	modes              []*CmdMode
-	mu                 sync.Mutex
-	pauseSuggestions   bool
-	isRecording        bool
-	pauseTimer         *time.Timer
-	activeSequenceName string
-	sequenceRegistry   map[string]Sequence
-	defaultCtx         context.Context
-	taskUpdates        chan TaskStatus
-	tasks              map[string]*TaskStatus
-	spinner            *spinner.Spinner
-	currFgTaskId       string
-	lastBgTaskId       string
-	fgTaskIdChan       chan string
-	bgTaskIdChan       chan string
+type ReplCmdHandler struct {
+	appCfg                *config.AppCfg
+	cmdRegistry           *CmdRegistry
+	natvieCmdRegistry     *CmdRegistry
+	listeners             KeyListenerRegistry
+	rl                    *readline.Instance
+	modes                 []*CmdMode
+	mu                    sync.Mutex
+	pauseSuggestions      bool
+	isRecordingModeActive bool
+	pauseTimer            *time.Timer
+	activeSequenceName    string
+	sequenceRegistry      map[string]Sequence
+	defaultCtx            context.Context
+	taskUpdates           chan TaskStatus
+	tasks                 map[string]*TaskStatus
+	spinner               *spinner.Spinner
+	currFgTaskId          string
+	lastBgTaskId          string
+	fgTaskIdChan          chan string
+	bgTaskIdChan          chan string
 }
 
 func NewCmdHandler(
 	appCfg *config.AppCfg,
 	rlCfg *readline.Config,
 	reg *CmdRegistry,
-) (*CmdHandler, error) {
-	cmh := &CmdHandler{
+) (*ReplCmdHandler, error) {
+	cmh := &ReplCmdHandler{
 		defaultCtx:   context.WithValue(context.Background(), CmdCtxIdKey, uuid.NewString()),
 		appCfg:       appCfg,
 		modes:        make([]*CmdMode, 0),
@@ -105,7 +140,7 @@ func newCmdCtx(ctx context.Context, tokens []string) *CmdCtx {
 	}
 }
 
-func (h *CmdHandler) NewTaskStatus(message, cmd string) *TaskStatus {
+func (h *ReplCmdHandler) NewTaskStatus(message, cmd string) *TaskStatus {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -121,61 +156,73 @@ func (h *CmdHandler) NewTaskStatus(message, cmd string) *TaskStatus {
 	return taskStatus
 }
 
-func (h *CmdHandler) GetCmdRegistry() *CmdRegistry {
+func (h *ReplCmdHandler) GetCmdRegistry() *CmdRegistry {
 	return h.cmdRegistry
 }
 
-func (h *CmdHandler) GetCurrentCmdMode() Cmd {
+func (h *ReplCmdHandler) GetCurrentModeCmd() Cmd {
 	if len(h.modes) != 0 {
 		return h.modes[len(h.modes)-1].Cmd
 	}
 	return nil
 }
 
-func (h *CmdHandler) GetDefaultCtx() context.Context {
+func (h *ReplCmdHandler) GetCurrentCmdMode() *CmdMode {
+	if len(h.modes) != 0 {
+		return h.modes[len(h.modes)-1]
+	}
+
+	return nil
+}
+
+func (h *ReplCmdHandler) GetDefaultCtx() context.Context {
 	return h.defaultCtx
 }
 
-func (h *CmdHandler) GetCmdByName(name string) Cmd {
+func (h *ReplCmdHandler) GetCmdByName(name string) Cmd {
 	if cmd, found := h.cmdRegistry.GetCmdByName(name); found {
 		return cmd
 	}
 	return nil
 }
 
-func (h *CmdHandler) GetUpdateChan() chan<- TaskStatus {
+func (h *ReplCmdHandler) GetUpdateChan() chan<- TaskStatus {
 	return h.taskUpdates
 }
 
-func (h *CmdHandler) GetAppCfg() *config.AppCfg {
+func (h *ReplCmdHandler) GetAppCfg() *config.AppCfg {
 	return h.appCfg
 }
 
-func (h *CmdHandler) PushCmdMode(modeName string, cmd Cmd) {
+func (h *ReplCmdHandler) PushCmdMode(modeName string, cmd Cmd, allowRootCmds bool) {
 	m := new(CmdMode)
 	m.CmdName = modeName
 	m.Cmd = cmd
+	m.AllowRootCmdsWhileInMode = allowRootCmds
 	h.modes = append(h.modes, m)
 	h.SetPrompt(modeName, " ")
 }
 
-func (h *CmdHandler) SetCurrentCmdMode(mode *CmdMode) {
+func (h *ReplCmdHandler) SetCurrentCmdMode(mode *CmdMode) {
 	h.SetPrompt(mode.CmdName, " ")
 }
 
-func (h *CmdHandler) SuggestRootCmds(partial string) (suggst [][]rune, offset int) {
-	offset = len(partial)
-	criteria := util.MatchCriteria[Cmd]{
+func (h *ReplCmdHandler) SuggestRootCmds(partial string) ([][]rune, int) {
+  offset := len(partial)
+	criteria := &util.MatchCriteria[Cmd]{
 		Search:     partial,
 		SuffixWith: " ",
 		M:          h.cmdRegistry.cmds,
 	}
 
-	return util.GetMatchingMapKeysAsRunes(&criteria), offset
+	if h.isRecordingModeActive {
+		criteria.M = h.cmdRegistry.cmds
+	}
 
+	return util.GetMatchingMapKeysAsRunes(criteria), offset
 }
 
-func (h *CmdHandler) SuggestVarNames(partial string) [][]rune {
+func (h *ReplCmdHandler) SuggestVarNames(partial string) [][]rune {
 	partial = strings.Trim(partial, " ")
 	search := ""
 	if len(partial) > 2 {
@@ -186,30 +233,45 @@ func (h *CmdHandler) SuggestVarNames(partial string) [][]rune {
 	return envMgr.GetMatchingVars(search)
 }
 
-func (h *CmdHandler) IsCmdModeActive() bool {
+func (h *ReplCmdHandler) IsCmdModeActive() bool {
 	return len(h.modes) != 0
 }
 
-func (h *CmdHandler) Suggest(tokens [][]rune) ([][]rune, int) {
+func (h *ReplCmdHandler) Suggest(tokens [][]rune) ([][]rune, int) {
 	if len(tokens) == 0 {
 		return nil, 0
 	}
 
 	lastToken := string(tokens[len(tokens)-1])
 	if isLikeAVariable(lastToken) {
-    offset := len(lastToken[strings.LastIndex(lastToken, "{{"):])-2
+		offset := len(lastToken[strings.LastIndex(lastToken, "{{"):]) - 2
 		return h.SuggestVarNames(lastToken), offset
 	}
 
 	mode := h.GetCurrentCmdMode()
 	if mode != nil {
-		return mode.GetSuggestions(tokens)
+		return h.SuggestInModeCmds(mode, tokens)
 	}
 
 	return h.SuggestCmds(tokens)
 }
 
-func (h *CmdHandler) SuggestCmds(tokens [][]rune) ([][]rune, int) {
+func (h *ReplCmdHandler) SuggestInModeCmds(mode *CmdMode, tokens [][]rune) ([][]rune, int) {
+	if mode == nil {
+		return nil, 0
+	}
+
+	suggestions, offset := mode.Cmd.GetSuggestions(tokens)
+
+	if mode.AllowRootCmdsWhileInMode {
+		nativeSuggestions, _ := h.SuggestCmds(tokens)
+		suggestions = append(suggestions, nativeSuggestions...)
+	}
+
+	return suggestions, offset
+}
+
+func (h *ReplCmdHandler) SuggestCmds(tokens [][]rune) ([][]rune, int) {
 	partial := string(tokens[0])
 	cmd := h.GetCmdByName(partial)
 	if cmd == nil {
@@ -221,7 +283,7 @@ func (h *CmdHandler) SuggestCmds(tokens [][]rune) ([][]rune, int) {
 	return cmd.GetSuggestions(subCmdTokens)
 }
 
-func (h *CmdHandler) PauseSuggestionsFor(d time.Duration) {
+func (h *ReplCmdHandler) PauseSuggestionsFor(d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -239,7 +301,7 @@ func (h *CmdHandler) PauseSuggestionsFor(d time.Duration) {
 	})
 }
 
-func (h *CmdHandler) Do(line []rune, pos int) (suggestions [][]rune, offset int) {
+func (h *ReplCmdHandler) Do(line []rune, pos int) (suggestions [][]rune, offset int) {
 	if len(line) == 0 || h.pauseSuggestions {
 		return nil, 0
 	}
@@ -264,25 +326,18 @@ func (h *CmdHandler) Do(line []rune, pos int) (suggestions [][]rune, offset int)
 	return suggestions, offset
 }
 
-func (h *CmdHandler) HandleCmd(
+func (h *ReplCmdHandler) HandleCmd(
 	ctx context.Context,
 	tokens []string,
 ) (context.Context, error) {
-	var (
-		cmd     Cmd
-		cmdName string
-	)
+	var cmd Cmd
 
-	if modeCmd := h.GetCurrentCmdMode(); modeCmd != nil {
+	if modeCmd := h.GetCurrentModeCmd(); modeCmd != nil {
 		cmd = modeCmd
-	} else {
-		cmdName = tokens[0]
-		cmd = h.GetCmdByName(cmdName)
+	} else if cmd = h.GetCmdByName(tokens[0]); cmd != nil {
 		tokens = tokens[1:]
-	}
-
-	if cmd == nil {
-		return ctx, fmt.Errorf("invalid cmd '%s'"+"\n", cmdName)
+	} else {
+		return ctx, fmt.Errorf("invalid cmd '%s'"+"\n", tokens[0])
 	}
 
 	remainingTkns, cmd := Walk(cmd, util.StrArrToRune(tokens))
@@ -297,7 +352,7 @@ func (h *CmdHandler) HandleCmd(
 	return cmd.Execute(cmdCtx)
 }
 
-func (h *CmdHandler) HandleAsyncCmd(
+func (h *ReplCmdHandler) HandleAsyncCmd(
 	ctx context.Context,
 	cmd AsyncCmd,
 	tokens []string,
@@ -325,7 +380,7 @@ func (h *CmdHandler) HandleAsyncCmd(
 	return taskCtx, nil
 }
 
-func (h *CmdHandler) handleUpdateChanClose() {
+func (h *ReplCmdHandler) handleUpdateChanClose() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -334,7 +389,7 @@ func (h *CmdHandler) handleUpdateChanClose() {
 	}
 }
 
-func (h *CmdHandler) handleTaskUpdate(statusUpdate TaskStatus) {
+func (h *ReplCmdHandler) handleTaskUpdate(statusUpdate TaskStatus) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -347,7 +402,7 @@ func (h *CmdHandler) handleTaskUpdate(statusUpdate TaskStatus) {
 	}
 }
 
-func (h *CmdHandler) findOrCreateTask(id string) *TaskStatus {
+func (h *ReplCmdHandler) findOrCreateTask(id string) *TaskStatus {
 	task, exists := h.tasks[id]
 	if !exists {
 		task = &TaskStatus{
@@ -359,7 +414,7 @@ func (h *CmdHandler) findOrCreateTask(id string) *TaskStatus {
 	return task
 }
 
-func (h *CmdHandler) updateTaskStatus(task *TaskStatus, update TaskStatus) {
+func (h *ReplCmdHandler) updateTaskStatus(task *TaskStatus, update TaskStatus) {
 	task.message = update.message
 	task.error = update.error
 	task.done = update.done
@@ -371,18 +426,18 @@ func (h *CmdHandler) updateTaskStatus(task *TaskStatus, update TaskStatus) {
 	}
 }
 
-func (h *CmdHandler) resetTaskState() {
+func (h *ReplCmdHandler) resetTaskState() {
 	h.spinner.Stop()
 	h.currFgTaskId = ""
 	h.lastBgTaskId = ""
 }
 
-func (h *CmdHandler) handleSuccessTaskStatus(task *TaskStatus) {
+func (h *ReplCmdHandler) handleSuccessTaskStatus(task *TaskStatus) {
 	h.resetTaskState()
 	fmt.Println("✅ Task completed\n", task.output)
 }
 
-func (h *CmdHandler) handleFailedTaskStatus(task *TaskStatus) {
+func (h *ReplCmdHandler) handleFailedTaskStatus(task *TaskStatus) {
 	h.resetTaskState()
 
 	fmt.Println("❌ Task failed\n")
@@ -395,7 +450,7 @@ func (h *CmdHandler) handleFailedTaskStatus(task *TaskStatus) {
 	color.HiRed(msg)
 }
 
-func (h *CmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
+func (h *ReplCmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
 	if !task.done && task.error == nil {
 		return
 	}
@@ -410,7 +465,7 @@ func (h *CmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
 	h.rl.Refresh()
 }
 
-func (h *CmdHandler) listenForTaskUpdates() {
+func (h *ReplCmdHandler) listenForTaskUpdates() {
 	for {
 		select {
 		case statusUpdate, ok := <-h.taskUpdates:
@@ -429,7 +484,7 @@ func (h *CmdHandler) listenForTaskUpdates() {
 	}
 }
 
-func (h *CmdHandler) ListTasks() {
+func (h *ReplCmdHandler) ListTasks() {
 	if len(h.tasks) == 0 {
 		fmt.Printf("nothing's running right now %s\n", "😴")
 		return
@@ -460,7 +515,7 @@ func (h *CmdHandler) ListTasks() {
 	}
 }
 
-func (h *CmdHandler) updateSpinnerMsg(ts *TaskStatus) {
+func (h *ReplCmdHandler) updateSpinnerMsg(ts *TaskStatus) {
 	if ts.error != nil {
 		h.spinner.Suffix = " " + ts.error.Error()
 	} else {
@@ -468,7 +523,7 @@ func (h *CmdHandler) updateSpinnerMsg(ts *TaskStatus) {
 	}
 }
 
-func (h *CmdHandler) sendTaskToBg() {
+func (h *ReplCmdHandler) sendTaskToBg() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -481,7 +536,7 @@ func (h *CmdHandler) sendTaskToBg() {
 	}
 }
 
-func (h *CmdHandler) bringTaskToFg(taskId string) {
+func (h *ReplCmdHandler) bringTaskToFg(taskId string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -500,19 +555,41 @@ func (h *CmdHandler) bringTaskToFg(taskId string) {
 	}
 }
 
-func (h *CmdHandler) Handle(tokens []string) {
+func (h *ReplCmdHandler) Handle(tokens []string) {
 	if _, err := h.HandleCmd(h.defaultCtx, tokens); err != nil {
 		fmt.Println(err.Error())
 	}
 
 	// if h.isRecording && err == nil {
-	if h.isRecording {
+	if h.isRecordingModeActive {
 		seq := h.sequenceRegistry[h.activeSequenceName]
 		seq = append(seq, Step{cmd: tokens})
 	}
 }
 
-func (h *CmdHandler) PlaySequence(name string) error {
+func (h *ReplCmdHandler) RegisterSequence(name string) error {
+	if h.sequenceRegistry == nil {
+		h.sequenceRegistry = make(map[string]Sequence)
+	}
+
+	if _, exists := h.sequenceRegistry[name]; exists {
+		return errors.New("sequence '%s' already exists")
+	}
+
+	h.sequenceRegistry[name] = Sequence{}
+	return nil
+}
+
+func (h *ReplCmdHandler) SaveSequenceStep(seqName string, s Step) error {
+	if seq, exists := h.sequenceRegistry[seqName]; exists {
+		seq = append(seq, s)
+		return nil
+	} else {
+		return fmt.Errorf("'%s' sequence doesn't exist", seqName)
+	}
+}
+
+func (h *ReplCmdHandler) PlaySequence(name string) error {
 	seq, exists := h.sequenceRegistry[name]
 	if !exists {
 		return fmt.Errorf("sequence '%s' not found", name)
@@ -525,20 +602,20 @@ func (h *CmdHandler) PlaySequence(name string) error {
 	return nil
 }
 
-func (h *CmdHandler) SetPrompt(newPrompt string, mascot string) {
+func (h *ReplCmdHandler) SetPrompt(newPrompt string, mascot string) {
 	h.rl.SetPrompt(FormatPrompt(newPrompt, mascot))
 }
 
-func (h *CmdHandler) RefreshPrompt() {
+func (h *ReplCmdHandler) RefreshPrompt() {
 	h.rl.Refresh()
 }
 
-func (h *CmdHandler) UpdatePromptEnv() {
+func (h *ReplCmdHandler) UpdatePromptEnv() {
 	def := h.appCfg.GetPrompt()
 	h.rl.SetPrompt(FormatPrompt(def, ""))
 }
 
-func (h *CmdHandler) ExitCmdMode() (quitShell bool) {
+func (h *ReplCmdHandler) ExitCmdMode() (quitShell bool) {
 	if len(h.modes) == 0 {
 		return true
 	}
@@ -556,7 +633,7 @@ func (h *CmdHandler) ExitCmdMode() (quitShell bool) {
 	return
 }
 
-func (h *CmdHandler) repl() {
+func (h *ReplCmdHandler) repl() {
 	if h.rl == nil {
 		panic("shell not assigned on handler")
 	}
@@ -584,7 +661,7 @@ func (h *CmdHandler) repl() {
 	}
 }
 
-func (h *CmdHandler) injectIntoCmds(reg map[string]Cmd) {
+func (h *ReplCmdHandler) injectIntoCmds(reg map[string]Cmd) {
 	for _, cmd := range reg {
 		cmd.setHandler(h)
 		subCmds := cmd.GetSubCmds()
@@ -594,7 +671,7 @@ func (h *CmdHandler) injectIntoCmds(reg map[string]Cmd) {
 	}
 }
 
-func (h *CmdHandler) activateListeners() {
+func (h *ReplCmdHandler) activateListeners() {
 	for _, lsnr := range h.listeners {
 		rlCfg := h.rl.Config
 		if rlCfg.KeyListeners == nil {
@@ -604,20 +681,20 @@ func (h *CmdHandler) activateListeners() {
 	}
 }
 
-func (h *CmdHandler) Bootstrap() {
+func (h *ReplCmdHandler) Bootstrap() {
 	h.injectIntoReg()
 	h.activateListeners()
 	h.repl()
 }
 
-func (h *CmdHandler) injectIntoReg() {
+func (h *ReplCmdHandler) injectIntoReg() {
 	if h.cmdRegistry == nil {
 		panic("injection failed, handler registery not initialized")
 	}
 	h.injectIntoCmds(h.cmdRegistry.cmds)
 }
 
-func (h *CmdHandler) RegisterListener(
+func (h *ReplCmdHandler) RegisterListener(
 	key rune,
 	action ListernerAction,
 	fn readline.FuncKeypressHandler,
@@ -628,7 +705,7 @@ func (h *CmdHandler) RegisterListener(
 	}
 }
 
-func (h *CmdHandler) AttemptToBringLastBgTaskToFg() {
+func (h *ReplCmdHandler) AttemptToBringLastBgTaskToFg() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -638,7 +715,7 @@ func (h *CmdHandler) AttemptToBringLastBgTaskToFg() {
 	h.fgTaskIdChan <- h.lastBgTaskId
 }
 
-func (h *CmdHandler) GetDefaultCtxId() CmdCtxID {
+func (h *ReplCmdHandler) GetDefaultCtxId() CmdCtxID {
 	id, _ := h.defaultCtx.Value(CmdCtxIdKey).(CmdCtxID) // Yeah yeah don't worry.. there won't be a case where this is otherwise ^_^
 	return id
 }

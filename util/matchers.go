@@ -2,23 +2,28 @@ package util
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
 type MatchCriteria[V any] struct {
-	M            map[string]V
-	Search       string
-	Offset       int    // optional
-	PrefixWith   string // optional
-	SuffixWith   string // optional
-	ConverToRune bool
+	M              map[string]V
+	Search         string
+	IgnorePatterns []string
+	Offset         int    // optional
+	PrefixWith     string // optional
+	SuffixWith     string // optional
+	ConverToRune   bool
 }
 
 func GetMatchingMapKeysAsRunes[V any](opts *MatchCriteria[V]) [][]rune {
 	suggestions, offset := make([][]rune, 0), len(opts.Search)
+	isStrEqual := func(s string) bool {
+		return strings.HasPrefix(s, opts.Search) &&
+			s != strings.TrimRight(opts.Search, "\n")
+	}
 	for s := range opts.M {
-		if strings.HasPrefix(s, opts.Search) &&
-			s != strings.TrimRight(opts.Search, "\n") {
+		if isStrEqual(s) && !slices.Contains(opts.IgnorePatterns, s) {
 			suggStr := surroundStr(s[offset:], opts.PrefixWith, opts.SuffixWith)
 			suggestions = append(suggestions, []rune(suggStr))
 		}
