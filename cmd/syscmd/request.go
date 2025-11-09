@@ -249,7 +249,7 @@ func (r *ReqCmd) register(
 	}
 
 	segments = segments[1:]
-	remainingTkns, subCmd := command.WalkTillLastSubCmd(util.StrArrToRune(segments))
+	remainingTkns, subCmd := command.WalkTillLastSubCmd(command.GetSubCmds(), util.StrArrToRune(segments))
 	for i, token := range remainingTkns {
 		isLast := i == len(segments)-1
 		if isLast {

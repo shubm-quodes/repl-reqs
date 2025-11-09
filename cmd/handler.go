@@ -33,11 +33,17 @@ type Cmd interface {
 
 	GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int)
 
+	GetInModeSuggestions(tokens [][]rune) (suggestions [][]rune, offset int)
+
 	GetSubCmds() SubCmd
+
+	GetInModeCmds() SubCmd
 
 	AddSubCmd(cmd Cmd) Cmd
 
-	WalkTillLastSubCmd(tokens [][]rune) (remainingTkns [][]rune, c Cmd)
+	AddInModeCmd(cmd Cmd) Cmd
+
+	WalkTillLastSubCmd(subCmdMap SubCmd, tokens [][]rune) (remainingTkns [][]rune, c Cmd)
 
 	filterSuggestions(partial string, offset int) [][]rune
 
@@ -196,6 +202,16 @@ func (h *ReplCmdHandler) GetCmdByName(name string) Cmd {
 	return nil
 }
 
+func (h *ReplCmdHandler) GetCurrModesInModeCmdByName(name string) Cmd {
+	if cmd := h.GetCurrentModeCmd(); cmd == nil {
+		return nil
+	} else if inModeCmds := cmd.GetInModeCmds(); inModeCmds == nil {
+		return nil
+	} else {
+		return inModeCmds[name]
+	}
+}
+
 func (h *ReplCmdHandler) GetUpdateChan() chan<- TaskStatus {
 	return h.taskUpdates
 }
@@ -217,19 +233,66 @@ func (h *ReplCmdHandler) SetCurrentCmdMode(mode *CmdMode) {
 	h.SetPrompt(mode.CmdName, " ")
 }
 
-func (h *ReplCmdHandler) SuggestRootCmds(partial string) ([][]rune, int) {
-  offset := len(partial)
+func (h *ReplCmdHandler) suggestCmdsFromMap(cmdMap map[string]Cmd, partial string) ([][]rune, int) {
+	offset := len(partial)
 	criteria := &util.MatchCriteria[Cmd]{
 		Search:     partial,
 		SuffixWith: " ",
-		M:          h.cmdRegistry.cmds,
-	}
-
-	if h.isRecordingModeActive {
-		criteria.M = h.cmdRegistry.cmds
+		M:          cmdMap,
 	}
 
 	return util.GetMatchingMapKeysAsRunes(criteria), offset
+}
+
+func (h *ReplCmdHandler) SuggestRootCmds(partial string) ([][]rune, int) {
+	return h.suggestCmdsFromMap(h.cmdRegistry.cmds, partial)
+}
+
+func (h *ReplCmdHandler) IsCmdModeActive() bool {
+	return len(h.modes) != 0
+}
+
+func (h *ReplCmdHandler) SuggestInModeRootCmds(partial string) ([][]rune, int) {
+	currModeCmd := h.GetCurrentModeCmd()
+	return h.suggestCmdsFromMap(currModeCmd.GetInModeCmds(), partial)
+}
+
+func (h *ReplCmdHandler) SuggestInModeCmds(tokens [][]rune) ([][]rune, int) {
+	cmdMode := h.GetCurrentCmdMode()
+	partial := string(tokens[0])
+	var (
+		suggestions [][]rune
+		offset      int
+	)
+
+	if cmd := h.GetCurrModesInModeCmdByName(partial); cmd == nil && len(tokens) == 1 {
+		suggestions, offset = h.SuggestInModeRootCmds(partial)
+	} else if cmd != nil {
+		return cmd.GetSuggestions(tokens[1:])
+	}
+
+	modeSubCmds, offset := cmdMode.Cmd.GetSuggestions(tokens)
+	suggestions = append(suggestions, modeSubCmds...)
+
+	if cmdMode.AllowRootCmdsWhileInMode {
+		var rootCmdSuggestions [][]rune
+		rootCmdSuggestions, offset = h.SuggestCmds(tokens)
+		suggestions = append(suggestions, rootCmdSuggestions...)
+	}
+
+	return suggestions, offset
+}
+
+func (h *ReplCmdHandler) SuggestCmds(tokens [][]rune) ([][]rune, int) {
+	partial := string(tokens[0])
+	if cmd := h.GetCmdByName(partial); cmd == nil && len(tokens) == 1 {
+		return h.SuggestRootCmds(partial)
+	} else if cmd != nil {
+		subCmdTokens := tokens[1:]
+		return cmd.GetSuggestions(subCmdTokens)
+	} else {
+		return nil, 0
+	}
 }
 
 func (h *ReplCmdHandler) SuggestVarNames(partial string) [][]rune {
@@ -241,10 +304,6 @@ func (h *ReplCmdHandler) SuggestVarNames(partial string) [][]rune {
 
 	envMgr := config.GetEnvManager()
 	return envMgr.GetMatchingVars(search)
-}
-
-func (h *ReplCmdHandler) IsCmdModeActive() bool {
-	return len(h.modes) != 0
 }
 
 func (h *ReplCmdHandler) Suggest(tokens [][]rune) ([][]rune, int) {
@@ -260,37 +319,10 @@ func (h *ReplCmdHandler) Suggest(tokens [][]rune) ([][]rune, int) {
 
 	mode := h.GetCurrentCmdMode()
 	if mode != nil {
-		return h.SuggestInModeCmds(mode, tokens)
+		return h.SuggestInModeCmds(tokens)
 	}
 
 	return h.SuggestCmds(tokens)
-}
-
-func (h *ReplCmdHandler) SuggestInModeCmds(mode *CmdMode, tokens [][]rune) ([][]rune, int) {
-	if mode == nil {
-		return nil, 0
-	}
-
-	suggestions, offset := mode.Cmd.GetSuggestions(tokens)
-
-	if mode.AllowRootCmdsWhileInMode {
-		nativeSuggestions, _ := h.SuggestCmds(tokens)
-		suggestions = append(suggestions, nativeSuggestions...)
-	}
-
-	return suggestions, offset
-}
-
-func (h *ReplCmdHandler) SuggestCmds(tokens [][]rune) ([][]rune, int) {
-	partial := string(tokens[0])
-	cmd := h.GetCmdByName(partial)
-	if cmd == nil {
-		sugg, offset := h.SuggestRootCmds(partial)
-		return sugg, offset
-	}
-
-	subCmdTokens := tokens[1:]
-	return cmd.GetSuggestions(subCmdTokens)
 }
 
 func (h *ReplCmdHandler) PauseSuggestionsFor(d time.Duration) {

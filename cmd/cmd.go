@@ -124,6 +124,16 @@ func (b *BaseCmd) AddSubCmd(cmd Cmd) Cmd {
 	return b
 }
 
+func (b *BaseCmd) AddInModeCmd(cmd Cmd) Cmd {
+	if b.InModeCmds == nil {
+		b.InModeCmds = make(SubCmd)
+	}
+
+	b.InModeCmds[cmd.Name()] = cmd
+	cmd.SetParent(b)
+	return b
+}
+
 func Walk(cmd Cmd, tokens [][]rune) (remainingTkns [][]rune, finalCmd Cmd) {
 	if len(tokens) == 0 {
 		return nil, cmd
@@ -143,19 +153,29 @@ func Walk(cmd Cmd, tokens [][]rune) (remainingTkns [][]rune, finalCmd Cmd) {
 }
 
 func (c *BaseCmd) WalkTillLastSubCmd(
+	subCmdMap SubCmd,
 	tokens [][]rune,
 ) (remainingTkns [][]rune, lastCmd Cmd) {
-	if len(tokens) == 0 || c.SubCmds == nil {
+	if len(tokens) == 0 {
+		return tokens, c
+	}
+
+	if subCmdMap == nil || len(subCmdMap) == 0 {
 		return tokens, c
 	}
 
 	firstToken := string(tokens[0])
-	subCmd, ok := c.SubCmds[firstToken]
+	subCmd, ok := subCmdMap[firstToken]
+
 	if !ok || subCmd == nil {
 		return tokens, c
 	}
 
-	return subCmd.WalkTillLastSubCmd(tokens[1:])
+	if nextBaseCmd, isBase := subCmd.(*BaseCmd); isBase {
+		return subCmd.WalkTillLastSubCmd(nextBaseCmd.SubCmds, tokens[1:])
+	}
+
+	return tokens[1:], subCmd
 }
 
 func (c *BaseCmd) filterSuggestions(partial string, offset int) [][]rune {
@@ -176,8 +196,24 @@ func (c *BaseCmd) setHandler(cmh CmdHandler) {
 	c.handler = cmh
 }
 
-func (c *BaseCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int) {
-	remainingTkns, lastSubCmd := c.WalkTillLastSubCmd(tokens)
+func (c *BaseCmd) GetSuggestions(tokens [][]rune) ([][]rune, int) {
+	return c.getSuggestions(c.SubCmds, tokens)
+}
+
+func (c *BaseCmd) GetInModeSuggestions(tokens [][]rune) ([][]rune, int) {
+  if len(tokens) == 0 {
+    return nil, 0
+  }
+
+	return c.getSuggestions(c.InModeCmds, tokens)
+}
+
+func (c *BaseCmd) getSuggestions(
+	subCmdMap SubCmd,
+	tokens [][]rune,
+) (suggestions [][]rune, offset int) {
+	remainingTkns, lastSubCmd := c.WalkTillLastSubCmd(subCmdMap, tokens)
+
 	if lastSubCmd == nil {
 		return
 	}
@@ -329,4 +365,3 @@ func (c *CmdCtx) ID() string {
 	id, _ := v.(string)
 	return string(id)
 }
-
