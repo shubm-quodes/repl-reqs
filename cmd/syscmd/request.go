@@ -249,7 +249,10 @@ func (r *ReqCmd) register(
 	}
 
 	segments = segments[1:]
-	remainingTkns, subCmd := command.WalkTillLastSubCmd(command.GetSubCmds(), util.StrArrToRune(segments))
+	remainingTkns, subCmd := command.WalkTillLastSubCmd(
+		command.GetSubCmds(),
+		util.StrArrToRune(segments),
+	)
 	for i, token := range remainingTkns {
 		isLast := i == len(segments)-1
 		if isLast {
@@ -364,46 +367,84 @@ func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 	return req, nil
 }
 
+func (rc *ReqCmd) extractTokenKey(token []rune) string {
+	s := string(token)
+
+	if s == "" {
+		return ""
+	}
+
+	parts := strings.SplitN(s, "=", 2)
+	return parts[0]
+}
+
+func (rc *ReqCmd) isTokenPreExisting(token []rune, remainingTkns [][]rune) bool {
+	sugKey := rc.extractTokenKey(token)
+
+	if sugKey == "" {
+		return false
+	}
+
+	for _, rmTkn := range remainingTkns {
+		if rc.extractTokenKey(rmTkn) == sugKey {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (rc *ReqCmd) filterRedundantTokens(suggestions, remainingTkns [][]rune) [][]rune {
+	var filteredSugg [][]rune
+
+	for _, sug := range suggestions {
+		if !rc.isTokenPreExisting(sug, remainingTkns) {
+			filteredSugg = append(filteredSugg, sug)
+		}
+	}
+
+	return filteredSugg
+}
+
 func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int) {
-	remainingTkns, lastFoundCmd := cmd.Walk(rc, tokens)
+	remainingTkns, lastFoundCmd := cmd.Walk(rc, rc.SubCmds, tokens)
 	if lastFoundCmd == nil && len(remainingTkns) > 0 {
 		lastFoundCmd = rc
 	}
 
-	if lastFoundCmd == nil {
+	finalCmd, ok := lastFoundCmd.(*ReqCmd)
+	if !ok || finalCmd == nil {
 		return
 	}
 
-	rc, ok := lastFoundCmd.(*ReqCmd)
-	if !ok {
-		return
-	}
-
-	suggestions, offset = rc.BaseCmd.GetSuggestions(remainingTkns)
+	suggestions, offset = finalCmd.BaseCmd.GetSuggestions(remainingTkns)
 	if len(suggestions) > 0 {
 		return
 	}
 
-	var search []rune
-	if len(remainingTkns) > 0 {
-		lastToken := string(remainingTkns[len(remainingTkns)-1])
-		if parts := strings.SplitN(lastToken, "=", 2); len(parts) != 2 {
-			search = []rune(lastToken)
-		}
-	}
-
+	search := rc.getSearchQuery(remainingTkns)
 	offset = len(search)
-	suggestions = rc.SuggestCmdParams(search)
+	suggestions = finalCmd.SuggestCmdParams(search)
 
-	if len(remainingTkns) > 0 {
-		symmetricDiff := util.SymmetricDifference(
-			util.RuneArrToStrArr(remainingTkns),
-			util.RuneArrToStrArr(suggestions),
-		)
-		suggestions = util.StrArrToRune(symmetricDiff)
+	if len(suggestions) > 0 && len(remainingTkns) > 0 {
+		suggestions = rc.filterRedundantTokens(suggestions, remainingTkns)
 	}
 
 	return
+}
+
+func (rc *ReqCmd) getSearchQuery(remainingTkns [][]rune) []rune {
+	if len(remainingTkns) == 0 {
+		return nil
+	}
+
+	lastToken := string(remainingTkns[len(remainingTkns)-1])
+
+	if parts := strings.SplitN(lastToken, "=", 2); len(parts) != 2 {
+		return []rune(lastToken)
+	}
+
+	return nil
 }
 
 func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
@@ -418,7 +459,6 @@ func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
 	}
 	for _, p := range params {
 		if p == nil {
-			fmt.Println("is nill")
 			continue
 		}
 		criteria.M = p
@@ -782,3 +822,5 @@ func SaveNewReqCmd(reqCmd *ReqCmd, cmd string) error {
 // 	}
 // 	return schema
 // }
+
+

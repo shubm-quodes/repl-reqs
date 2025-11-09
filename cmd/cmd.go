@@ -134,19 +134,22 @@ func (b *BaseCmd) AddInModeCmd(cmd Cmd) Cmd {
 	return b
 }
 
-func Walk(cmd Cmd, tokens [][]rune) (remainingTkns [][]rune, finalCmd Cmd) {
+func Walk(
+	cmd Cmd,
+	subCmdMap map[string]Cmd,
+	tokens [][]rune,
+) (remainingTkns [][]rune, finalCmd Cmd) {
 	if len(tokens) == 0 {
 		return nil, cmd
 	}
 
-	subCmds := cmd.GetSubCmds()
-	if subCmds == nil {
+	if subCmdMap == nil {
 		return tokens, cmd
 	}
 
 	subCmdName := string(tokens[0])
-	if subCmd, ok := subCmds[subCmdName]; ok {
-		return Walk(subCmd, tokens[1:])
+	if subCmd, ok := subCmdMap[subCmdName]; ok {
+		return Walk(subCmd, subCmdMap, tokens[1:])
 	}
 
 	return tokens, cmd
@@ -160,7 +163,7 @@ func (c *BaseCmd) WalkTillLastSubCmd(
 		return tokens, c
 	}
 
-	if subCmdMap == nil || len(subCmdMap) == 0 {
+	if len(subCmdMap) == 0 {
 		return tokens, c
 	}
 
@@ -201,9 +204,9 @@ func (c *BaseCmd) GetSuggestions(tokens [][]rune) ([][]rune, int) {
 }
 
 func (c *BaseCmd) GetInModeSuggestions(tokens [][]rune) ([][]rune, int) {
-  if len(tokens) == 0 {
-    return nil, 0
-  }
+	if len(tokens) == 0 {
+		return nil, 0
+	}
 
 	return c.getSuggestions(c.InModeCmds, tokens)
 }

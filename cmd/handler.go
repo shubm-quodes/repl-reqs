@@ -374,17 +374,16 @@ func (h *ReplCmdHandler) HandleCmd(
 ) (context.Context, error) {
 	var cmd Cmd
 
-	if modeCmd := h.GetCurrentModeCmd(); modeCmd != nil {
-		cmd = modeCmd
+	if cmd = h.GetCurrentModeCmd(); cmd != nil {
+
 	} else if cmd = h.GetCmdByName(tokens[0]); cmd != nil {
 		tokens = tokens[1:]
 	} else {
-		return ctx, fmt.Errorf("invalid cmd '%s'"+"\n", tokens[0])
+		return ctx, fmt.Errorf("invalid cmd '%s'\n", tokens[0])
 	}
 
-	remainingTkns, cmd := Walk(cmd, util.StrArrToRune(tokens))
-	rmTks := len(remainingTkns) + 1/2
-	args := tokens[len(tokens)-rmTks:]
+	remainingTkns, cmd := Walk(cmd, cmd.GetSubCmds(), util.StrArrToRune(tokens))
+	args := tokens[len(tokens)-len(remainingTkns):]
 	cmdCtx := newCmdCtx(ctx, args)
 	cmdCtx.ExpandedTokens = args
 
