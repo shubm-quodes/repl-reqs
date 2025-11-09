@@ -48,16 +48,6 @@ type CmdHandler interface {
 	GetCmdRegistry() *CmdRegistry
 }
 
-type AsyncCmd interface {
-	Cmd
-
-	ExecuteAsync(*CmdCtx)
-}
-
-type SetupAbleCmd interface {
-	Setup(*ReplCmdHandler) error
-}
-
 type BaseCmd struct {
 	Name_      string
 	Desc_      string
@@ -66,11 +56,6 @@ type BaseCmd struct {
 	parent     Cmd
 	handler    CmdHandler
 	taskStatus *TaskStatus
-}
-
-type AsyncCmd interface {
-	Cmd
-	ExecuteAsync(*CmdCtx)
 }
 
 type SubCmd map[string]Cmd
@@ -132,7 +117,7 @@ func (b *BaseCmd) SetParent(parent Cmd) {
 
 func (b *BaseCmd) AddSubCmd(cmd Cmd) Cmd {
 	if b.SubCmds == nil {
-		b.SubCmds = make(map[string]Cmd)
+		b.SubCmds = make(SubCmd)
 	}
 	b.SubCmds[cmd.Name()] = cmd
 	cmd.SetParent(b)
