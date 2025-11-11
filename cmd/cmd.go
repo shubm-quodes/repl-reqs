@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/shubm-quodes/repl-reqs/config"
 )
 
 const CmdCtxIdKey CmdCtxID = "cmdCtx"
@@ -16,30 +18,53 @@ type CmdCtx struct {
 	ExpandedTokens []string
 }
 
-type Cmd interface {
-	Name() string
-	Desc() string
-	GetFullyQualifiedName() string
-	setHandler(*CmdHandler)
-	SetParent(Cmd)
-	GetCmdHandler() *CmdHandler
-	GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int)
-	GetSubCmds() SubCmd
-	AddSubCmd(cmd Cmd) Cmd
-	WalkTillLastSubCmd(tokens [][]rune) (remainingTkns [][]rune, c Cmd)
-	filterSuggestions(partial string, offset int) [][]rune
-	Execute(*CmdCtx) (context.Context, error)
-	SetTaskStatus(*TaskStatus)
-	GetTaskStatus() *TaskStatus
-	cleanup()
+type CmdHandler interface {
+	SuggestCmds(tokens [][]rune) ([][]rune, int)
+
+	GetCurrentModeCmd() Cmd
+
+	GetCurrentCmdMode() *CmdMode
+
+	PushCmdMode(promptName string, cm Cmd, allowRootCmdSugg bool)
+
+	UpdatePromptEnv()
+
+	GetAppCfg() *config.AppCfg
+
+	SetPrompt(prompt, mascot string)
+
+	GetUpdateChan() chan<- TaskStatus
+
+	ListTasks()
+
+	RegisterSequence(sequenceName string) error
+
+	SaveSequenceStep(sequenceName string, step Step) error
+
+	GetDefaultCtx() context.Context
+
+	HandleCmd(ctx context.Context, tokens []string) (context.Context, error)
+
+	GetCmdRegistry() *CmdRegistry
+}
+
+type AsyncCmd interface {
+	Cmd
+
+	ExecuteAsync(*CmdCtx)
+}
+
+type SetupAbleCmd interface {
+	Setup(*ReplCmdHandler) error
 }
 
 type BaseCmd struct {
 	Name_      string
 	Desc_      string
-	SubCmds    map[string]Cmd
+	SubCmds    SubCmd
+	InModeCmds SubCmd
 	parent     Cmd
-	handler    *CmdHandler
+	handler    CmdHandler
 	taskStatus *TaskStatus
 }
 
@@ -77,7 +102,11 @@ func (c *BaseCmd) GetSubCmds() SubCmd {
 	return c.SubCmds
 }
 
-func (c *BaseCmd) GetCmdHandler() *CmdHandler {
+func (c *BaseCmd) GetInModeCmds() SubCmd {
+	return c.InModeCmds
+}
+
+func (c *BaseCmd) GetCmdHandler() CmdHandler {
 	return c.handler
 }
 
@@ -158,7 +187,7 @@ func (c *BaseCmd) filterSuggestions(partial string, offset int) [][]rune {
 	return suggestions
 }
 
-func (c *BaseCmd) setHandler(cmh *CmdHandler) {
+func (c *BaseCmd) setHandler(cmh CmdHandler) {
 	c.handler = cmh
 }
 
@@ -184,8 +213,8 @@ func (c *BaseCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 // Just a default Execute method if no args or an invalid sub cmd gets provided
 func (c *BaseCmd) Execute(cmdCtx *CmdCtx) (context.Context, error) {
 	hdlr := c.GetCmdHandler()
-	if hdlr.GetCurrentCmdMode() != c {
-		hdlr.PushCmdMode(c.Name_, c)
+	if hdlr.GetCurrentModeCmd() != c {
+		hdlr.PushCmdMode(c.Name_, c, false)
 	}
 	return cmdCtx.Ctx, nil
 }
@@ -315,3 +344,4 @@ func (c *CmdCtx) ID() string {
 	id, _ := v.(string)
 	return string(id)
 }
+

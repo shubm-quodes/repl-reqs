@@ -3,7 +3,7 @@ package syscmd
 import "github.com/shubm-quodes/repl-reqs/cmd"
 
 func RegisterCmds(reg *cmd.CmdRegistry) {
-	s := &setCmd{cmd.NewBaseCmd(CmdSetName, "")}
+	s := &CmdSet{cmd.NewBaseCmd(CmdSetName, "")}
 	s.AddSubCmd(&CmdEnv{cmd.NewBaseCmd(CmdEnvName, "")}).
 		AddSubCmd(&CmdVar{cmd.NewBaseCmd(CmdVarName, "")}).
 		AddSubCmd(&CmdURL{NewBaseReqCmd(CmdURLName)}).
@@ -16,6 +16,7 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 		AddSubCmd(&CmdQuery{NewBaseReqCmd(CmdQueryName)})
 
 	n := &draftReqCmd{NewBaseReqCmd(CmdDraftReqName)}
+
 	send := &CmdSend{ReqCmd: NewReqCmd(CmdSendName, nil)}
 
 	ls := &CmdLs{cmd.NewBaseCmd(CmdLsName, "")}
