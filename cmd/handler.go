@@ -50,6 +50,16 @@ type Cmd interface {
 	cleanup()
 }
 
+type AsyncCmd interface {
+	Cmd
+
+	ExecuteAsync(*CmdCtx)
+}
+
+type SetupAbleCmd interface {
+	Setup(*ReplCmdHandler) error
+}
+
 type CmdMode struct {
 	CmdName                  string
 	prompt                   string
