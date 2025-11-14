@@ -119,7 +119,7 @@ func NewCmdHandler(
 		appCfg:       appCfg,
 		modes:        make([]*CmdMode, 0),
 		listeners:    make(KeyListenerRegistry),
-		taskUpdates:  make(chan TaskStatus),
+		taskUpdates:  make(chan TaskStatus, 1),
 		fgTaskIdChan: make(chan string),
 		bgTaskIdChan: make(chan string),
 		tasks:        make(map[string]*TaskStatus),
@@ -492,6 +492,7 @@ func (h *ReplCmdHandler) HandleAsyncCmd(
 	cmdCtx := newCmdCtx(taskCtx, tokens)
 	cmdCtx.ExpandedTokens = tokens
 
+	h.rl.SaveHistory(cmd.GetFullyQualifiedName() + " " + strings.Join(tokens, " "))
 	if h.isSeqStepCtx(ctx) {
 		h.HandleAsyncSeqStep(cmd, cmdCtx)
 	} else {
@@ -501,7 +502,6 @@ func (h *ReplCmdHandler) HandleAsyncCmd(
 		h.taskUpdates <- *task
 		go func() {
 			defer h.spinner.Stop()
-			defer h.RefreshPrompt()
 
 			cmd.ExecuteAsync(cmdCtx)
 		}()
@@ -563,7 +563,10 @@ func (h *ReplCmdHandler) resetTaskState() {
 
 func (h *ReplCmdHandler) handleSuccessTaskStatus(task *TaskStatus) {
 	h.resetTaskState()
-	fmt.Println("✅ Task completed\n", task.output)
+	const lineClear = "                                                                                " // 80 spaces
+
+	fmt.Printf("\r%s\r✅ Task completed\n %s\n", lineClear, task.output)
+	h.RefreshPrompt()
 }
 
 func (h *ReplCmdHandler) handleFailedTaskStatus(task *TaskStatus) {
@@ -614,6 +617,22 @@ func (h *ReplCmdHandler) listenForTaskUpdates() {
 	}
 }
 
+func (h *ReplCmdHandler) ListSequences() {
+	var names []string
+	for seqName := range h.sequenceRegistry {
+		names = append(names, seqName)
+	}
+
+	sort.Strings(names)
+
+	fmt.Print("Sequences -\n\n")
+	for idx, n := range names {
+		fmt.Printf("%d.) %s\n", idx+1, n)
+	}
+
+	fmt.Println("\ntotal", len(names))
+}
+
 func (h *ReplCmdHandler) ListTasks() {
 	if len(h.tasks) == 0 {
 		fmt.Printf("nothing's running right now %s\n", "😴")
@@ -630,18 +649,22 @@ func (h *ReplCmdHandler) ListTasks() {
 	fmt.Println("🕙 Tasks ~")
 	for _, taskId := range taskIds {
 		status := h.tasks[taskId]
-		formatStr := "\n%s %s ~ %s"
-		if status.error != nil {
-			formatStr = formatStr + "❌"
-		} else if status.done {
-			formatStr = formatStr + "✅"
-		} else {
-			formatStr = formatStr + "In progres...🏃"
-		}
-
-		fmt.Printf(formatStr+"\n", status.id, status.cmd, status.output)
+		h.PrintFormattedTaskStatus(status)
 		fmt.Print("\n---------------------------------------------------\n")
 	}
+}
+
+func (h *ReplCmdHandler) PrintFormattedTaskStatus(status *TaskStatus) {
+	formatStr := "\n%s %s ~ %s"
+	if status.error != nil {
+		formatStr = formatStr + "❌"
+	} else if status.done {
+		formatStr = formatStr + "✅"
+	} else {
+		formatStr = formatStr + "In progres...🏃"
+	}
+
+	fmt.Printf(formatStr+"\n", status.id, status.cmd, status.output)
 }
 
 func (h *ReplCmdHandler) updateSpinnerMsg(ts *TaskStatus) {

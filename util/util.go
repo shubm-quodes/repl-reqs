@@ -57,7 +57,7 @@ func IntersectSlice[T comparable](sliceA, sliceB []T) []T {
 func SymmetricDifference[T comparable](sliceA, sliceB []T) []T {
 	aSet := make(map[T]struct{})
 	bSet := make(map[T]struct{})
-	
+
 	for _, item := range sliceA {
 		aSet[item] = struct{}{}
 	}
@@ -66,7 +66,7 @@ func SymmetricDifference[T comparable](sliceA, sliceB []T) []T {
 	}
 
 	symmetricDiff := make([]T, 0)
-	added := make(map[T]struct{}) 
+	added := make(map[T]struct{})
 
 	for _, item := range sliceA {
 		if _, existsInB := bSet[item]; !existsInB {
@@ -294,20 +294,38 @@ func ReaderToString(reader io.Reader) (string, error) {
 	return string(b), nil
 }
 
-func GetTruncatedStr(s string) string {
-	width, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		// Fallback to a default width if terminal size can't be determined
-		width = 80
+func getTruncatedStrCore(s string, width int) string {
+	if width <= 6 {
+		return s
 	}
 
 	halfWidth := width / 2
 
 	if len(s) > halfWidth-3 {
 		return s[:halfWidth-3] + "..."
-	} else {
+	}
+
+	return s
+}
+
+func GetTruncatedStr(s string) string {
+	const defaultFallbackWidth = 120
+
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+
+	if err != nil || width == 0 {
+		width = defaultFallbackWidth
+	}
+
+	return getTruncatedStrCore(s, width)
+}
+
+func GetTruncatedStrWithWidth(s string, width int) string {
+	if width <= 0 {
 		return s
 	}
+
+	return getTruncatedStrCore(s, width)
 }
 
 func mapSlice[T any, R any](
@@ -332,4 +350,52 @@ func AreEmptyStrs(strs ...string) bool {
 
 func StripAnsi(str string) string {
 	return re.ReplaceAllString(str, "")
+}
+
+func SliceDiff[T comparable](a, b []T) []T {
+	bSet := make(map[T]struct{}, len(b))
+
+	for _, item := range b {
+		bSet[item] = struct{}{}
+	}
+
+	var result []T
+	for _, item := range a {
+		if _, found := bSet[item]; !found {
+			result = append(result, item)
+		}
+	}
+
+	return result
+}
+
+func RuneSliceDiff(a, b [][]rune) [][]rune {
+	bSet := make(map[string]struct{}, len(b))
+	for _, runeSlice := range b {
+		strKey := string(runeSlice)
+		bSet[strKey] = struct{}{}
+	}
+
+	var result [][]rune
+	for _, runeSlice := range a {
+		strKey := string(runeSlice)
+
+		if _, found := bSet[strKey]; !found {
+			result = append(result, runeSlice)
+		}
+	}
+
+	return result
+}
+
+func ReverseSlice[T any](s []T) []T {
+	reversed := make([]T, len(s))
+
+	copy(reversed, s)
+
+	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
+		reversed[i], reversed[j] = reversed[j], reversed[i]
+	}
+
+	return reversed
 }

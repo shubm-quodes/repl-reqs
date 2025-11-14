@@ -21,7 +21,8 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 
 	ls := &CmdLs{cmd.NewBaseCmd(CmdLsName, "")}
 	ls.AddSubCmd(&CmdLsVars{cmd.NewBaseCmd(CmdLsVarsName, "")}).
-		AddSubCmd(&CmdLsTasks{cmd.NewBaseCmd(CmdLsTasksName, "")})
+		AddSubCmd(&CmdLsTasks{cmd.NewBaseCmd(CmdLsTasksName, "")}).
+		AddSubCmd(&CmdLsSequences{cmd.NewBaseCmd(CmdLsSequencesName, "")})
 
 	save := &CmdSave{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdSaveName, "")}}
 	dlt := &CmdDelete{BaseCmd: cmd.NewBaseCmd(CmdDeleteName, "")}

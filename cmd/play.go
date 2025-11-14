@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/shubm-quodes/repl-reqs/config"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 const (
@@ -62,19 +64,27 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 		seqCtx := context.Background()
 		seqCtx = context.WithValue(seqCtx, SeqModeIndicatorKey, true)
 		stepCtx := seqCtx
+		seq = pl.cloneSequence(seq)
 		for idx, step := range seq {
 			stepCtx = context.WithValue(stepCtx, StepKey, step)
 			var expandedCmd []string
 			if expandedCmd, execErr = step.ExpandTokens(seq, config.GetEnvManager().GetActiveEnvVars()); execErr != nil {
 				break
 			}
+
+			taskStatus.SetMessage(
+				fmt.Sprintf(
+					"step %d: %s",
+					idx+1,
+					util.GetTruncatedStr(strings.Join(expandedCmd, " ")),
+				),
+			)
+
+			taskUpdate <- (*taskStatus)
 			stepCtx, execErr = hdlr.HandleCmd(stepCtx, expandedCmd)
 			if execErr != nil {
 				break
 			}
-
-			taskStatus.SetMessage(fmt.Sprintf("step '%d' completed", idx+1))
-			taskUpdate <- (*taskStatus)
 		}
 		errChan <- execErr
 	}()
@@ -100,3 +110,18 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 	taskUpdate <- (*taskStatus)
 }
 
+func (pl *CmdPlay) cloneSequence(originalSeq []*Step) []*Step {
+	clonedSeq := make([]*Step, len(originalSeq))
+
+	for idx, step := range originalSeq {
+		clonedSeq[idx] = pl.cloneStep(step)
+	}
+	return clonedSeq
+}
+
+func (pl *CmdPlay) cloneStep(originalStep *Step) *Step {
+	return &Step{
+		Name: originalStep.Name,
+		Cmd:  originalStep.Cmd,
+	}
+}

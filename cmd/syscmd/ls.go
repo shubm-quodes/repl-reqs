@@ -15,8 +15,9 @@ const (
 	CmdLsName = "$ls"
 
 	// Sub cmds
-	CmdLsVarsName  = "vars"
-	CmdLsTasksName = "tasks"
+	CmdLsVarsName      = "vars"
+	CmdLsTasksName     = "tasks"
+	CmdLsSequencesName = "sequences"
 )
 
 type CmdLs struct {
@@ -28,6 +29,10 @@ type CmdLsVars struct {
 }
 
 type CmdLsTasks struct {
+	*cmd.BaseCmd
+}
+
+type CmdLsSequences struct {
 	*cmd.BaseCmd
 }
 
@@ -51,5 +56,10 @@ func (ls *CmdLsVars) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 
 func (ls *CmdLsTasks) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	ls.GetCmdHandler().ListTasks()
+	return cmdCtx.Ctx, nil
+}
+
+func (ls *CmdLsSequences) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	ls.GetCmdHandler().ListSequences()
 	return cmdCtx.Ctx, nil
 }

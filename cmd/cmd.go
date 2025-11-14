@@ -33,6 +33,8 @@ type CmdHandler interface {
 
 	PushCmdMode(promptName string, cm Cmd, allowRootCmdSugg bool)
 
+	ExitCmdMode() bool
+
 	UpdatePromptEnv()
 
 	GetAppCfg() *config.AppCfg
@@ -44,6 +46,8 @@ type CmdHandler interface {
 	GetUpdateChan() chan<- TaskStatus
 
 	ListTasks()
+
+	ListSequences()
 
 	RegisterSequence(sequenceName string) error
 
