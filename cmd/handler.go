@@ -76,9 +76,10 @@ type CmdMode struct {
 type Step struct {
 	name string
 	cmd  []string
+	*TaskStatus
 }
 
-type Sequence []Step
+type Sequence []*Step
 
 type ListernerAction string
 type KeyListener struct {
@@ -368,29 +369,92 @@ func (h *ReplCmdHandler) Do(line []rune, pos int) (suggestions [][]rune, offset 
 	return suggestions, offset
 }
 
+func (h *ReplCmdHandler) GetRootCmd(tokens []string) (Cmd, []string, error) {
+	if cmd := h.GetCurrentModeCmd(); cmd != nil {
+		return cmd, tokens, nil
+	}
+
+	if len(tokens) == 0 {
+		return nil, nil, fmt.Errorf("no command provided")
+	}
+
+	if cmd := h.GetCmdByName(tokens[0]); cmd != nil {
+		return cmd, tokens[1:], nil
+	}
+
+	return nil, nil, fmt.Errorf("invalid command '%s'", tokens[0])
+}
+
+func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, remainingTokens []string) (Cmd, []string) {
+	remainingTkns, finalCmd := Walk(
+		rootCmd,
+		rootCmd.GetSubCmds(),
+		util.StrArrToRune(remainingTokens),
+	)
+
+	args := remainingTokens[len(remainingTokens)-len(remainingTkns):]
+
+	return finalCmd, args
+}
+
+func (h *ReplCmdHandler) executeCommand(
+	ctx context.Context,
+	rootCmd Cmd,
+	remainingTokens []string,
+) (context.Context, error) {
+
+	finalCmd, args := h.ResolveCommand(rootCmd, remainingTokens)
+
+	cmdCtx := newCmdCtx(ctx, args)
+	cmdCtx.ExpandedTokens = args
+
+	if asyncCmd, ok := finalCmd.(AsyncCmd); ok {
+		return h.HandleAsyncCmd(ctx, asyncCmd, args)
+	}
+
+	return finalCmd.Execute(cmdCtx)
+}
+
 func (h *ReplCmdHandler) HandleCmd(
 	ctx context.Context,
 	tokens []string,
 ) (context.Context, error) {
-	var cmd Cmd
-
-	if cmd = h.GetCurrentModeCmd(); cmd != nil {
-
-	} else if cmd = h.GetCmdByName(tokens[0]); cmd != nil {
-		tokens = tokens[1:]
-	} else {
-		return ctx, fmt.Errorf("invalid cmd '%s'\n", tokens[0])
+	rootCmd, remainingTokens, err := h.GetRootCmd(tokens)
+	if err != nil {
+		return ctx, err
 	}
 
-	remainingTkns, cmd := Walk(cmd, cmd.GetSubCmds(), util.StrArrToRune(tokens))
-	args := tokens[len(tokens)-len(remainingTkns):]
-	cmdCtx := newCmdCtx(ctx, args)
-	cmdCtx.ExpandedTokens = args
+	return h.executeCommand(ctx, rootCmd, remainingTokens)
+}
 
-	if asyncCmd, ok := cmd.(AsyncCmd); ok {
-		return h.HandleAsyncCmd(ctx, asyncCmd, args)
+func (h *ReplCmdHandler) HandleRootCmd(
+	ctx context.Context,
+	tokens []string,
+) (context.Context, error) {
+	if len(tokens) == 0 {
+		return ctx, errors.New("no command to execute")
 	}
-	return cmd.Execute(cmdCtx)
+
+	cmd := h.GetCmdByName(tokens[0])
+	if cmd == nil {
+		return ctx, fmt.Errorf("invalid command '%s'", tokens[0])
+	}
+
+	return h.executeCommand(ctx, cmd, tokens[1:])
+}
+
+func (h *ReplCmdHandler) isSeqStepCtx(ctx context.Context) bool {
+	is, ok := ctx.Value(SeqModeIndicatorKey).(bool)
+	return ok && is
+}
+
+func (h *ReplCmdHandler) HandleAsyncSeqStep(cmd AsyncCmd, cmdCtx *CmdCtx) {
+	ctx := cmdCtx.Ctx
+	if step, ok := ctx.Value(StepKey).(*Step); ok {
+		step.TaskStatus = cmd.GetTaskStatus()
+	}
+
+	cmd.ExecuteAsync(cmdCtx)
 }
 
 func (h *ReplCmdHandler) HandleAsyncCmd(
@@ -399,24 +463,27 @@ func (h *ReplCmdHandler) HandleAsyncCmd(
 	tokens []string,
 ) (context.Context, error) {
 	task := h.NewTaskStatus(TaskStatusInitiated+" 🕙", cmd.GetFullyQualifiedName())
-	h.spinner.Start()
-	h.spinner.Suffix = task.message
-	h.taskUpdates <- *task
-
 	taskCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	h.currFgTaskId = task.id
 	cmd.SetTaskStatus(task)
 
-	go func() {
-		defer h.spinner.Stop()
+	cmdCtx := newCmdCtx(taskCtx, tokens)
+	cmdCtx.ExpandedTokens = tokens
 
-		cmdCtx := newCmdCtx(taskCtx, tokens)
-		cmdCtx.ExpandedTokens = tokens
+	if h.isSeqStepCtx(ctx) {
+		h.HandleAsyncSeqStep(cmd, cmdCtx)
+	} else {
+		h.currFgTaskId = task.id
+		h.spinner.Start()
+		h.spinner.Suffix = task.message
+		h.taskUpdates <- *task
+		go func() {
+			defer h.spinner.Stop()
 
-		cmd.ExecuteAsync(cmdCtx)
-	}()
+			cmd.ExecuteAsync(cmdCtx)
+		}()
+	}
 
 	return taskCtx, nil
 }
@@ -537,7 +604,6 @@ func (h *ReplCmdHandler) ListTasks() {
 	}
 
 	sort.Strings(taskIds)
-	fmt.Printf("%+v", taskIds)
 
 	fmt.Println("🕙 Tasks ~")
 	for _, taskId := range taskIds {
@@ -600,11 +666,27 @@ func (h *ReplCmdHandler) Handle(tokens []string) {
 	if _, err := h.HandleCmd(h.defaultCtx, tokens); err != nil {
 		fmt.Println(err.Error())
 	}
+}
 
-	// if h.isRecording && err == nil {
-	if h.isRecordingModeActive {
-		seq := h.sequenceRegistry[h.activeSequenceName]
-		seq = append(seq, Step{cmd: tokens})
+func (h *ReplCmdHandler) tryRecordStep(tokens []string) {
+	mode := h.GetCurrentCmdMode()
+	if mode == nil {
+		return
+	}
+
+	rec, ok := mode.Cmd.(*CmdRec)
+	if !ok || !rec.isLiveModeEnabled {
+		return
+	}
+
+	if len(tokens) > 0 && tokens[0] == CmdRecName {
+		return
+	}
+
+	if err := h.SaveSequenceStep(rec.currSequence, &Step{
+		cmd: tokens,
+	}); err != nil {
+		fmt.Printf("Warning: Failed to save sequence step: %v\n", err)
 	}
 }
 
@@ -621,13 +703,26 @@ func (h *ReplCmdHandler) RegisterSequence(name string) error {
 	return nil
 }
 
-func (h *ReplCmdHandler) SaveSequenceStep(seqName string, s Step) error {
+func (h *ReplCmdHandler) SaveSequenceStep(seqName string, s *Step) error {
 	if seq, exists := h.sequenceRegistry[seqName]; exists {
+		if s.name == "" {
+			s.name = fmt.Sprintf("step #%d", len(seq)+1)
+		}
 		seq = append(seq, s)
+		h.sequenceRegistry[seqName] = seq
 		return nil
 	} else {
 		return fmt.Errorf("'%s' sequence doesn't exist", seqName)
 	}
+}
+
+func (h *ReplCmdHandler) GetSequence(name string) (Sequence, error) {
+	seq, exists := h.sequenceRegistry[name]
+	if !exists {
+		return nil, fmt.Errorf("sequence '%s' not found", name)
+	}
+
+	return seq, nil
 }
 
 func (h *ReplCmdHandler) PlaySequence(name string) error {
@@ -645,6 +740,10 @@ func (h *ReplCmdHandler) PlaySequence(name string) error {
 
 func (h *ReplCmdHandler) SetPrompt(newPrompt string, mascot string) {
 	h.rl.SetPrompt(FormatPrompt(newPrompt, mascot))
+}
+
+func (h *ReplCmdHandler) SetIsRecMode(is bool) {
+	h.isRecordingModeActive = is
 }
 
 func (h *ReplCmdHandler) RefreshPrompt() {
@@ -723,6 +822,7 @@ func (h *ReplCmdHandler) activateListeners() {
 }
 
 func (h *ReplCmdHandler) Bootstrap() {
+	h.registerNativeCmds()
 	h.injectIntoReg()
 	h.activateListeners()
 	h.repl()
@@ -759,6 +859,16 @@ func (h *ReplCmdHandler) AttemptToBringLastBgTaskToFg() {
 func (h *ReplCmdHandler) GetDefaultCtxId() CmdCtxID {
 	id, _ := h.defaultCtx.Value(CmdCtxIdKey).(CmdCtxID) // Yeah yeah don't worry.. there won't be a case where this is otherwise ^_^
 	return id
+}
+
+func (h *ReplCmdHandler) registerNativeCmds() {
+	rec := &CmdRec{BaseCmd: NewBaseCmd(CmdRecName, "")}
+
+	rec.AddInModeCmd(&CmdIsEq{NewBaseCmd(CmdIsEqName, "")}).
+		AddInModeCmd(&CmdPlayStep{NewBaseCmd(CmdPlayStepName, "")})
+
+	play := &CmdPlay{BaseCmd: NewBaseCmd(CmdPlayName, "")}
+	h.GetCmdRegistry().RegisterCmd(rec, play)
 }
 
 func isLikeAVariable(segment string) bool {

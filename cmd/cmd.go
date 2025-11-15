@@ -21,9 +21,13 @@ type CmdCtx struct {
 type CmdHandler interface {
 	SuggestCmds(tokens [][]rune) ([][]rune, int)
 
+	SuggestVarNames(partial string) [][]rune
+
 	GetCurrentModeCmd() Cmd
 
 	GetCurrentCmdMode() *CmdMode
+
+	GetSequence(name string) (Sequence, error)
 
 	PushCmdMode(promptName string, cm Cmd, allowRootCmdSugg bool)
 
@@ -33,15 +37,19 @@ type CmdHandler interface {
 
 	SetPrompt(prompt, mascot string)
 
+	SetIsRecMode(bool)
+
 	GetUpdateChan() chan<- TaskStatus
 
 	ListTasks()
 
 	RegisterSequence(sequenceName string) error
 
-	SaveSequenceStep(sequenceName string, step Step) error
+	SaveSequenceStep(sequenceName string, step *Step) error
 
 	GetDefaultCtx() context.Context
+
+	HandleRootCmd(ctx context.Context, tokens []string) (context.Context, error)
 
 	HandleCmd(ctx context.Context, tokens []string) (context.Context, error)
 
