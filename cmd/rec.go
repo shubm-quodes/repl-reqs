@@ -14,8 +14,15 @@ const (
 
 type CmdRec struct {
 	*BaseCmd
+	isFinalized       bool
 	isLiveModeEnabled bool
-	currSequence      string
+	currSequenceName  string
+}
+
+func (cr *CmdRec) updatePromptStep() {
+	hdlr := cr.GetCmdHandler()
+	seq, _ := hdlr.GetSequence(cr.currSequenceName)
+	hdlr.SetPrompt(fmt.Sprintf("rec(%s) 🔴 step #%d", cr.currSequenceName, len(seq)+1), "")
 }
 
 func (cr *CmdRec) Execute(cmdCtx *CmdCtx) (context.Context, error) {
@@ -29,7 +36,11 @@ func (cr *CmdRec) Execute(cmdCtx *CmdCtx) (context.Context, error) {
 		return ctx, cr.enableRecMode(tokens)
 	}
 
-	return ctx, cr.handleSequenceCmd(tokens)
+	if err := cr.handleSequenceCmd(tokens); err != nil {
+		return ctx, err
+	}
+	cr.updatePromptStep()
+	return ctx, nil
 }
 
 func (cr *CmdRec) registerNewSequence(sequenceName string) error {
@@ -37,7 +48,7 @@ func (cr *CmdRec) registerNewSequence(sequenceName string) error {
 	if err := hdlr.RegisterSequence(sequenceName); err != nil {
 		return err
 	} else {
-		cr.currSequence = sequenceName
+		cr.currSequenceName = sequenceName
 	}
 
 	fmt.Printf("Registered new sequence '%s'\n", sequenceName)
@@ -57,44 +68,34 @@ func (cr *CmdRec) enableRecMode(tokens []string) error {
 	if err := cr.registerNewSequence(sequenceName); err != nil {
 		return err
 	}
-	cr.GetCmdHandler().PushCmdMode(fmt.Sprintf("rec(%s) 🔴", strings.Join(tokens, " ")), cr, true)
+	cr.GetCmdHandler().
+		PushCmdMode(fmt.Sprintf("rec(%s) 🔴 step #1", strings.Join(tokens, " ")), cr, true)
 	return nil
 }
 
 func (cr *CmdRec) handleSequenceCmd(tokens []string) error {
 	hdlr := cr.GetCmdHandler()
 
-	// Check for REC subcommands (like 'stop' or 'pause') first
-	// if isRecSubcommand(tokens) { // You would need to implement this check
-	//     // Handle REC subcommands here (or let them error out if not supported)
-	// }
-
 	if cr.isLiveModeEnabled {
-		// 🚨 FIX: Call the method that executes the command as a root command,
-		// bypassing the current command mode check.
 		if _, err := hdlr.HandleRootCmd(hdlr.GetDefaultCtx(), tokens); err != nil {
 			return err
 		}
 	}
 
-	return hdlr.SaveSequenceStep(cr.currSequence, &Step{
-		cmd: tokens,
+	return hdlr.SaveSequenceStep(cr.currSequenceName, &Step{
+		Cmd: tokens,
 	})
 }
 
-// func (cr *CmdRec) handleSequenceCmd(tokens []string) error {
-// 	hdlr := cr.GetCmdHandler()
-// 	if cr.isLiveModeEnabled {
-// 		if _, err := hdlr.HandleCmd(hdlr.GetDefaultCtx(), tokens); err != nil {
-// 			return err
-// 		}
-// 	}
-//
-// 	return hdlr.SaveSequenceStep(cr.currSequence, &Step{
-// 		cmd: tokens,
-// 	})
-// }
-
 func (cr *CmdRec) AllowRootCmdsWhileInMode() bool {
 	return true
+}
+
+func (cr *CmdRec) cleanup() {
+	if cr.isFinalized {
+		return
+	}
+
+	cr.GetCmdHandler().DiscardSequence(cr.currSequenceName)
+	fmt.Printf("sequence '%s' was not finalized\n", cr.currSequenceName)
 }

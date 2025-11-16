@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -71,12 +74,6 @@ type CmdMode struct {
 	prompt                   string
 	Cmd                      Cmd
 	AllowRootCmdsWhileInMode bool
-}
-
-type Step struct {
-	name string
-	cmd  []string
-	*TaskStatus
 }
 
 type Sequence []*Step
@@ -290,6 +287,7 @@ func (h *ReplCmdHandler) SuggestCmds(tokens [][]rune) ([][]rune, int) {
 		return h.SuggestRootCmds(partial)
 	} else if cmd != nil {
 		subCmdTokens := tokens[1:]
+		subCmdTokens, cmd = Walk(cmd, cmd.GetSubCmds(), subCmdTokens)
 		return cmd.GetSuggestions(subCmdTokens)
 	} else {
 		return nil, 0
@@ -305,6 +303,16 @@ func (h *ReplCmdHandler) SuggestVarNames(partial string) [][]rune {
 
 	envMgr := config.GetEnvManager()
 	return envMgr.GetMatchingVars(search)
+}
+
+func (h *ReplCmdHandler) SuggestSequences(partial string) [][]rune {
+	criteria := &util.MatchCriteria[Sequence]{
+		Search:     partial,
+		SuffixWith: " ",
+		M:          h.sequenceRegistry,
+	}
+
+	return util.GetMatchingMapKeysAsRunes(criteria)
 }
 
 func (h *ReplCmdHandler) Suggest(tokens [][]rune) ([][]rune, int) {
@@ -385,14 +393,27 @@ func (h *ReplCmdHandler) GetRootCmd(tokens []string) (Cmd, []string, error) {
 	return nil, nil, fmt.Errorf("invalid command '%s'", tokens[0])
 }
 
-func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, remainingTokens []string) (Cmd, []string) {
-	remainingTkns, finalCmd := Walk(
-		rootCmd,
-		rootCmd.GetSubCmds(),
-		util.StrArrToRune(remainingTokens),
+func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, tokens []string) (Cmd, []string) {
+	var (
+		finalCmd      Cmd
+		remainingTkns [][]rune
 	)
 
-	args := remainingTokens[len(remainingTokens)-len(remainingTkns):]
+	if h.GetCurrentModeCmd() != nil {
+		remainingTkns, finalCmd = Walk(
+			rootCmd,
+			rootCmd.GetInModeCmds(),
+			util.StrArrToRune(tokens),
+		)
+	} else {
+		remainingTkns, finalCmd = Walk(
+			rootCmd,
+			rootCmd.GetSubCmds(),
+			util.StrArrToRune(tokens),
+		)
+	}
+
+	args := tokens[len(tokens)-len(remainingTkns):]
 
 	return finalCmd, args
 }
@@ -480,6 +501,7 @@ func (h *ReplCmdHandler) HandleAsyncCmd(
 		h.taskUpdates <- *task
 		go func() {
 			defer h.spinner.Stop()
+			defer h.RefreshPrompt()
 
 			cmd.ExecuteAsync(cmdCtx)
 		}()
@@ -535,7 +557,6 @@ func (h *ReplCmdHandler) updateTaskStatus(task *TaskStatus, update TaskStatus) {
 }
 
 func (h *ReplCmdHandler) resetTaskState() {
-	h.spinner.Stop()
 	h.currFgTaskId = ""
 	h.lastBgTaskId = ""
 }
@@ -548,7 +569,8 @@ func (h *ReplCmdHandler) handleSuccessTaskStatus(task *TaskStatus) {
 func (h *ReplCmdHandler) handleFailedTaskStatus(task *TaskStatus) {
 	h.resetTaskState()
 
-	fmt.Println("❌ Task failed\n")
+	fmt.Println("❌ Task failed")
+	fmt.Println()
 	msg := task.error.Error()
 
 	if task.output != "" {
@@ -569,8 +591,8 @@ func (h *ReplCmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
 		} else {
 			h.handleFailedTaskStatus(task)
 		}
+		h.rl.Refresh()
 	}
-	h.rl.Refresh()
 }
 
 func (h *ReplCmdHandler) listenForTaskUpdates() {
@@ -683,8 +705,8 @@ func (h *ReplCmdHandler) tryRecordStep(tokens []string) {
 		return
 	}
 
-	if err := h.SaveSequenceStep(rec.currSequence, &Step{
-		cmd: tokens,
+	if err := h.SaveSequenceStep(rec.currSequenceName, &Step{
+		Cmd: tokens,
 	}); err != nil {
 		fmt.Printf("Warning: Failed to save sequence step: %v\n", err)
 	}
@@ -703,10 +725,55 @@ func (h *ReplCmdHandler) RegisterSequence(name string) error {
 	return nil
 }
 
+func (h *ReplCmdHandler) DiscardSequence(seqName string) error {
+	if _, err := h.GetSequence(seqName); err != nil {
+		return err
+	} else {
+		delete(h.sequenceRegistry, seqName)
+		return h.refreshPersistedSequences()
+	}
+}
+
+func (h *ReplCmdHandler) FinalizeSequence(seqName string) error {
+	if seq, exists := h.sequenceRegistry[seqName]; exists {
+		if len(seq) == 0 {
+			return fmt.Errorf("cannot finalize sequence '%s', no steps were added", seqName)
+		}
+		return h.refreshPersistedSequences()
+	} else {
+		return fmt.Errorf("'%s' sequence doesn't exist", seqName)
+	}
+}
+
+func (h *ReplCmdHandler) sequenceFilePath() string {
+	cfg := config.GetAppCfg()
+	return path.Join(cfg.DirPath(), "sequences.json")
+}
+
+func (h *ReplCmdHandler) loadSequences() error {
+	rawSeqCfg, err := os.ReadFile(h.sequenceFilePath())
+	if err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(rawSeqCfg, &h.sequenceRegistry); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *ReplCmdHandler) refreshPersistedSequences() error {
+	if bytes, err := json.MarshalIndent(h.sequenceRegistry, "", "  "); err != nil {
+		return err
+	} else {
+		return os.WriteFile(h.sequenceFilePath(), bytes, 0644)
+	}
+}
+
 func (h *ReplCmdHandler) SaveSequenceStep(seqName string, s *Step) error {
 	if seq, exists := h.sequenceRegistry[seqName]; exists {
-		if s.name == "" {
-			s.name = fmt.Sprintf("step #%d", len(seq)+1)
+		if s.Name == "" {
+			s.Name = fmt.Sprintf("step #%d", len(seq)+1)
 		}
 		seq = append(seq, s)
 		h.sequenceRegistry[seqName] = seq
@@ -733,7 +800,7 @@ func (h *ReplCmdHandler) PlaySequence(name string) error {
 
 	ctx := context.Background()
 	for _, s := range seq {
-		h.HandleCmd(ctx, s.cmd)
+		h.HandleCmd(ctx, s.Cmd)
 	}
 	return nil
 }
@@ -808,6 +875,11 @@ func (h *ReplCmdHandler) injectIntoCmds(reg map[string]Cmd) {
 		if len(subCmds) > 0 {
 			h.injectIntoCmds(subCmds)
 		}
+
+		inModeCmds := cmd.GetInModeCmds()
+		if len(inModeCmds) > 0 {
+			h.injectIntoCmds(inModeCmds)
+		}
 	}
 }
 
@@ -825,6 +897,7 @@ func (h *ReplCmdHandler) Bootstrap() {
 	h.registerNativeCmds()
 	h.injectIntoReg()
 	h.activateListeners()
+	h.loadSequences()
 	h.repl()
 }
 
@@ -865,7 +938,8 @@ func (h *ReplCmdHandler) registerNativeCmds() {
 	rec := &CmdRec{BaseCmd: NewBaseCmd(CmdRecName, "")}
 
 	rec.AddInModeCmd(&CmdIsEq{NewBaseCmd(CmdIsEqName, "")}).
-		AddInModeCmd(&CmdPlayStep{NewBaseCmd(CmdPlayStepName, "")})
+		AddInModeCmd(&CmdPlayStep{NewBaseCmd(CmdPlayStepName, "")}).
+		AddInModeCmd(&CmdFinalizeRec{NewBaseCmd(CmdFinalizeRecName, "")})
 
 	play := &CmdPlay{BaseCmd: NewBaseCmd(CmdPlayName, "")}
 	h.GetCmdRegistry().RegisterCmd(rec, play)

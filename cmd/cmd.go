@@ -21,6 +21,8 @@ type CmdCtx struct {
 type CmdHandler interface {
 	SuggestCmds(tokens [][]rune) ([][]rune, int)
 
+	SuggestSequences(partial string) [][]rune
+
 	SuggestVarNames(partial string) [][]rune
 
 	GetCurrentModeCmd() Cmd
@@ -54,6 +56,10 @@ type CmdHandler interface {
 	HandleCmd(ctx context.Context, tokens []string) (context.Context, error)
 
 	GetCmdRegistry() *CmdRegistry
+
+	FinalizeSequence(name string) error
+
+	DiscardSequence(name string) error
 }
 
 type BaseCmd struct {

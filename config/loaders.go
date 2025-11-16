@@ -18,20 +18,6 @@ func (c *AppCfg) Load() {
 	util.CopyMap(activeVars, c.RawCfg.Commons.vars)
 }
 
-func (c *AppCfg) setBaseURL(conf map[string]any) {
-	if baseUrl, found := conf["baseUrl"].(string); found {
-		if !strings.HasSuffix(baseUrl, "/") {
-			baseUrl = baseUrl + "/"
-		}
-		c.BaseUrl = baseUrl
-		return
-	}
-	fmt.Fprintln(os.Stderr,
-		`failed to initialize config: No "baseUrl" was specified`,
-	)
-	os.Exit(1)
-}
-
 func (c *AppCfg) loadCfg() {
 	fileContents, err := os.ReadFile(c.file)
 	if err != nil {

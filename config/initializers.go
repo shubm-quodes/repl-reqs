@@ -15,10 +15,10 @@ import (
 // Loads and initializes configuration parameters based on user supplied flags.
 func Initialize(flags *FlagVal) *AppCfg {
 	appCfg = NewAppCfg()
-	appCfg.DirPath = flags.configPath
+	appCfg.dirPath = flags.configPath
 	appCfg.file = path.Join(flags.configPath, "config.json")
 	appCfg.HistoryFile = path.Join(flags.configPath, "history")
-	appCfg.VimMode = flags.enableVimMode
+	appCfg.vimMode = flags.enableVimMode
 	appCfg.Load()
 	return appCfg
 }
@@ -45,7 +45,7 @@ func GetShellCfg(cfg *AppCfg) *readline.Config {
 		AutoComplete:      nil,
 		InterruptPrompt:   "^C",
 		EOFPrompt:         "exit",
-		VimMode:           cfg.VimMode,
+		VimMode:           cfg.vimMode,
 		HistorySearchFold: true,
 		FuncFilterInputRune: func(r rune) (rune, bool) {
 			switch r {
@@ -85,15 +85,16 @@ func getDefaultEditor() string {
 
 // Creates a configuration template/boilerplate along with the required files
 func (c *AppCfg) initializeCfgTemplate() {
-	if util.FileDoesNotExist(c.DirPath) {
-		os.Mkdir(c.DirPath, 0700)
+	if util.FileDoesNotExist(c.dirPath) {
+		os.Mkdir(c.dirPath, 0700)
 	}
 	// config.json is that file, which is going to hold all the accumulated configuration.
 	for file, contents := range map[string]string{
-		"config.json": `{"requests": []}`,
-		"history":     "",
+		"config.json":    `{"requests": []}`,
+		"history":        "",
+		"sequences.json": `[]`,
 	} {
-		absPath := path.Join(c.DirPath, file)
+		absPath := path.Join(c.dirPath, file)
 		if util.FileDoesNotExist(file) {
 			createFile(absPath, contents)
 		}
@@ -124,14 +125,14 @@ func writeContents(file *os.File, contents string) error {
 
 func (c *AppCfg) isCfgTemplateExists() bool {
 	return !slices.ContainsFunc([]string{
-		c.DirPath,
+		c.dirPath,
 		c.file,
 		c.HistoryFile,
 	}, util.FileDoesNotExist)
 }
 
 func (c *AppCfg) getConfFilePath() string {
-	return path.Join(getConfDirPath(c.DirPath), "conf.json")
+	return path.Join(getConfDirPath(c.dirPath), "conf.json")
 }
 
 func getConfDirPath(confPath string) string {

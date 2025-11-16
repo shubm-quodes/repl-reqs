@@ -516,12 +516,17 @@ func (rc *ReqCmd) MakeRequest(req *http.Request) {
 }
 
 func (rc *ReqCmd) readAndUnmarshalResponse(resp *http.Response, target map[string]any) error {
-	respBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	err = json.Unmarshal(respBytes, &target)
+	// Restore it so it can be read again later
+	resp.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
+
+	err = json.Unmarshal(bodyBytes, &target)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal JSON response: %w", err)
 	}
@@ -530,8 +535,6 @@ func (rc *ReqCmd) readAndUnmarshalResponse(resp *http.Response, target map[strin
 }
 
 func (rc *ReqCmd) handleSuccessfulResponse(taskStatus *cmd.TaskStatus, result network.Update) {
-	defer result.Resp().Body.Close()
-
 	respMap := make(map[string]any)
 
 	err := rc.readAndUnmarshalResponse(result.Resp(), respMap)

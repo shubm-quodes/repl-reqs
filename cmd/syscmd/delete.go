@@ -15,6 +15,7 @@ const (
 
 	// Sub cmds
 	CmdDeleteVarName = "var"
+	CmdDeleteSeqName = "sequence"
 )
 
 type CmdDelete struct {
@@ -22,6 +23,10 @@ type CmdDelete struct {
 }
 
 type CmdDeleteVar struct {
+	*cmd.BaseCmd
+}
+
+type CmdDeleteSeq struct {
 	*cmd.BaseCmd
 }
 
@@ -42,19 +47,29 @@ func (dltVar *CmdDeleteVar) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error)
 	return ctx, nil
 }
 
-func (dltVar *CmdDelete) GetSuggestions(tokens [][]rune) ([][]rune, int) {
-	if len(tokens) >= 1 && dltVar.isSubCmd(string(tokens[0])) {
-		var search string
-		if len(tokens) > 1 {
-			search = string(tokens[1])
-		}
-		return config.GetEnvManager().GetMatchingVars(search), len(search)
-	} else {
-		return dltVar.BaseCmd.GetSuggestions(tokens)
+func (dltSeq *CmdDeleteSeq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	ctx, tokens := cmdCtx.Ctx, cmdCtx.ExpandedTokens
+	if len(tokens) == 0 {
+		return ctx, errors.New("please specify sequence name❗️")
 	}
+
+	return ctx, dltSeq.GetCmdHandler().DiscardSequence(tokens[0])
 }
 
-func (dltVar *CmdDelete) isSubCmd(partial string) bool {
-	_, ok := dltVar.SubCmds[partial]
-	return ok
+func (dltSeq *CmdDeleteSeq) GetSuggestions(tokens [][]rune) ([][]rune, int) {
+	var search string
+	if len(tokens) == 1 {
+		search = string(tokens[0])
+	}
+
+	return dltSeq.GetCmdHandler().SuggestSequences(search), len(search)
+}
+
+func (dltVar *CmdDeleteVar) GetSuggestions(tokens [][]rune) ([][]rune, int) {
+	var search string
+	if len(tokens) == 1 {
+		search = string(tokens[0])
+	}
+
+	return config.GetEnvManager().GetMatchingVars(search), len(search)
 }

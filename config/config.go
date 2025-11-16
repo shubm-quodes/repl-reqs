@@ -29,14 +29,13 @@ type RawCfg struct {
 type AppCfg struct {
 	prompt          string
 	mascot          string
-	BaseUrl         string
-	DirPath         string
+	dirPath         string
 	file            string
-	DefaultEditor   string
+	defaultEditor   string
 	HistoryFile     string
 	TempFiles       []string
-	VimMode         bool
-	EnableDebugging bool
+	vimMode         bool
+	enableDebugging bool
 	truncatePrompt  bool
 	maxPromptChars  int32
 	RawCfg          RawCfg
@@ -56,7 +55,7 @@ func NewAppCfg() *AppCfg {
 	return &AppCfg{
 		truncatePrompt: true,
 		maxPromptChars: 20,
-		DefaultEditor:  getReplEditor(),
+		defaultEditor:  getReplEditor(),
 	}
 }
 
@@ -73,7 +72,11 @@ func GetDefaultMascot() string {
 }
 
 func (ac *AppCfg) CfgFilePath() string {
-  return ac.file
+	return ac.file
+}
+
+func (ac *AppCfg) DirPath() string {
+	return ac.dirPath
 }
 
 func (ac *AppCfg) GetPrompt() string {
