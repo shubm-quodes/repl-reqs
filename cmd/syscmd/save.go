@@ -29,11 +29,11 @@ func (s *CmdSave) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	reqCmd.RequestDraft = s.Mgr.PeakRequestDraft(cmdCtx.ID())
 	reqCmd.PopulateSchemasFromDraft()
 
-	if err := SaveNewReqCmd(reqCmd, strings.Join(tokens, " ")); err != nil {
+	reqCmd.register(strings.Join(tokens, " "), s.GetCmdHandler(), s.Mgr)
+	if err := UpsertReqCfg(reqCmd); err != nil {
 		return ctx, err
 	}
 
-	reqCmd.register(strings.Join(tokens, " "), s.GetCmdHandler(), s.Mgr)
 	fmt.Println("request saved successfully")
 	return ctx, nil
 }

@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 )
 
@@ -33,7 +35,7 @@ type AppCfg struct {
 	file            string
 	defaultEditor   string
 	HistoryFile     string
-	TempFiles       []string
+	tempFiles       []string
 	vimMode         bool
 	enableDebugging bool
 	truncatePrompt  bool
@@ -71,12 +73,22 @@ func GetDefaultMascot() string {
 	return defaultMascot
 }
 
+// Creates a temporary file with the specified extension
+func (ac *AppCfg) NewTempFile(extension string) (*os.File, error) {
+	fileName := fmt.Sprintf("repl-reqs-temp-%d.%s", len(ac.tempFiles)+1, extension)
+	return os.CreateTemp("", fileName)
+}
+
 func (ac *AppCfg) CfgFilePath() string {
 	return ac.file
 }
 
 func (ac *AppCfg) DirPath() string {
 	return ac.dirPath
+}
+
+func (ac *AppCfg) GetDefaultEditor() string {
+	return ac.defaultEditor
 }
 
 func (ac *AppCfg) GetPrompt() string {

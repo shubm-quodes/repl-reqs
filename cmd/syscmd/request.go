@@ -60,6 +60,16 @@ type ReqCmd struct {
 	*network.RequestDraft
 }
 
+type ReqCmdCfg struct {
+	HttpMethod   string                `json:"httpMethod"`
+	Cmd          string                `json:"cmd"`
+	Url          string                `json:"url"`
+	QueryParams  map[string]Validation `json:"queryParams"`
+	UrlParams    map[string]Validation `json:"urlParams"`
+	Payload      map[string]Validation `json:"payload"`
+	RequestDraft *network.RequestDraft `json:"requestDraft"`
+}
+
 type ReqData struct {
 	queryParams KeyValPair
 	Headers     KeyValPair
@@ -103,6 +113,18 @@ func NewReqCmd(name string, mgr *network.RequestManager) *ReqCmd {
 	}
 }
 
+func NewReqCfgFromCmd(rc *ReqCmd) *ReqCmdCfg {
+	return &ReqCmdCfg{
+		Cmd:          rc.GetFullyQualifiedName(),
+		Url:          rc.Url,
+		HttpMethod:   string(rc.Method),
+		QueryParams:  rc.ReqPropsSchema.QueryParams,
+		UrlParams:    rc.ReqPropsSchema.UrlParams,
+		Payload:      rc.ReqPropsSchema.Payload,
+		RequestDraft: rc.RequestDraft,
+	}
+}
+
 func (brc *BaseReqCmd) SetReqMgr(mgr *network.RequestManager) {
 	brc.Mgr = mgr
 }
@@ -128,7 +150,7 @@ func InitNetCmds(rawCfg config.RawCfg, hdlr *cmd.ReplCmdHandler) error {
 		nil,
 		strMapToHttpHeader(rawCfg.Commons.Headers),
 	)
-	if err := parseRawReqCfg(rawCfg, hdlr, mgr); err != nil {
+	if err := processRawReqCfg(rawCfg, hdlr, mgr); err != nil {
 		return err
 	}
 	injectReqMgr(hdlr, mgr)
@@ -176,35 +198,51 @@ func injectReqMgrIntoSubCmds(reg map[string]cmd.Cmd, mgr *network.RequestManager
 	}
 }
 
-func parseRawReqCfg(
+func (r *ReqCmd) UnmarshalJSON(data []byte) error {
+	var rawProps struct {
+		Cmd            string             `json:"cmd"`
+		Url            string             `json:"url"`
+		HttpMethod     network.HTTPMethod `json:"httpMethod"`
+		Headers        KeyValPair         `json:"headers"`
+		RawQueryParams json.RawMessage    `json:"queryParams"`
+		RawUrlParams   json.RawMessage    `json:"urlParams"`
+		RawPayload     json.RawMessage    `json:"payload"`
+	}
+
+	if err := json.Unmarshal(data, &rawProps); err != nil {
+		return err
+	}
+
+	r.Name_ = rawProps.Cmd // Temporarily assignment, gets overriden upon registration
+	r.SetUrl(rawProps.Url).
+		SetMethod(rawProps.HttpMethod).
+		SetHeaders(rawProps.Headers)
+
+	r.initializeVlds(
+		rawProps.RawUrlParams,
+		rawProps.RawQueryParams,
+		rawProps.RawPayload,
+	)
+	return nil
+}
+
+func (r *ReqCmd) MarshalJSON() ([]byte, error) {
+	reqCfg := NewReqCfgFromCmd(r)
+	return json.Marshal(reqCfg)
+}
+
+func processRawReqCfg(
 	rawCfg config.RawCfg,
 	hdlr *cmd.ReplCmdHandler,
 	rMgr *network.RequestManager,
 ) error {
 	for _, req := range rawCfg.RawRequests {
-		var rawProps struct {
-			Cmd            string             `json:"cmd"`
-			Url            string             `json:"url"`
-			HttpMethod     network.HTTPMethod `json:"httpMethod"`
-			Headers        KeyValPair         `json:"headers"`
-			RawQueryParams json.RawMessage    `json:"queryParams"`
-			RawUrlParams   json.RawMessage    `json:"urlParams"`
-			RawPayload     json.RawMessage    `json:"payload"`
-		}
-		if err := json.Unmarshal(req, &rawProps); err != nil {
+		reqCmd := NewReqCmd("", rMgr)
+		if err := json.Unmarshal(req, &reqCmd); err != nil {
 			return err
+		} else {
+			reqCmd.register(reqCmd.Name_, hdlr, rMgr)
 		}
-		reqCmd := NewReqCmd("", rMgr).
-			SetUrl(rawProps.Url).
-			SetMethod(rawProps.HttpMethod).
-			SetHeaders(rawProps.Headers)
-
-		reqCmd.initializeVlds(
-			rawProps.RawUrlParams,
-			rawProps.RawQueryParams,
-			rawProps.RawPayload,
-		)
-		reqCmd.register(rawProps.Cmd, hdlr, rMgr)
 	}
 	return nil
 }
@@ -217,7 +255,7 @@ func strMapToHttpHeader(m map[string]string) http.Header {
 	return h
 }
 
-func (r *ReqCmd) register(
+func (rc *ReqCmd) register(
 	cmdWithSubCmds string,
 	hdlr cmd.CmdHandler,
 	rMgr *network.RequestManager,
@@ -230,11 +268,11 @@ func (r *ReqCmd) register(
 	segments := strings.Fields(cmdWithSubCmds)
 	rootCmd := segments[0]
 	cmdRegistry := hdlr.GetCmdRegistry()
-	r.Mgr = rMgr
+	rc.Mgr = rMgr
 
 	if len(segments) == 1 {
-		r.Name_ = rootCmd
-		cmdRegistry.RegisterCmd(r)
+		rc.Name_ = rootCmd
+		cmdRegistry.RegisterCmd(rc)
 	}
 
 	if existingCmd, exists := cmdRegistry.GetCmdByName(rootCmd); exists {
@@ -256,8 +294,8 @@ func (r *ReqCmd) register(
 	for i, token := range remainingTkns {
 		isLast := i == len(segments)-1
 		if isLast {
-			r.Name_ = string(token)
-			subCmd.AddSubCmd(r)
+			rc.Name_ = string(token)
+			subCmd.AddSubCmd(rc)
 		} else {
 			subCmd = subCmd.AddSubCmd(NewReqCmd(string(token), rMgr))
 		}
@@ -406,24 +444,28 @@ func (rc *ReqCmd) filterRedundantTokens(suggestions, remainingTkns [][]rune) [][
 	return filteredSugg
 }
 
-func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int) {
+func (rc *ReqCmd) walkCommandTree(tokens [][]rune) (*ReqCmd, [][]rune) {
 	remainingTkns, lastFoundCmd := cmd.Walk(rc, rc.SubCmds, tokens)
+
 	if lastFoundCmd == nil && len(remainingTkns) > 0 {
 		lastFoundCmd = rc
 	}
 
 	finalCmd, ok := lastFoundCmd.(*ReqCmd)
 	if !ok || finalCmd == nil {
-		return
+		return nil, nil
 	}
 
-	suggestions, offset = finalCmd.BaseCmd.GetSuggestions(remainingTkns)
-	if len(suggestions) > 0 {
-		return
-	}
+	return finalCmd, remainingTkns
+}
 
+func (rc *ReqCmd) suggestParameters(
+	finalCmd *ReqCmd,
+	remainingTkns [][]rune,
+) (suggestions [][]rune, offset int) {
 	search := rc.getSearchQuery(remainingTkns)
 	offset = len(search)
+
 	suggestions = finalCmd.SuggestCmdParams(search)
 
 	if len(suggestions) > 0 && len(remainingTkns) > 0 {
@@ -431,6 +473,17 @@ func (rc *ReqCmd) GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset 
 	}
 
 	return
+}
+
+func (rc *ReqCmd) GetSuggestions(tokens [][]rune) ([][]rune, int) {
+	finalCmd, remainingTkns := rc.walkCommandTree(tokens)
+	suggestions, offset := finalCmd.BaseCmd.GetSuggestions(remainingTkns)
+
+	if len(suggestions) > 0 {
+		return suggestions, offset
+	}
+
+	return rc.suggestParameters(finalCmd, remainingTkns)
 }
 
 func (rc *ReqCmd) getSearchQuery(remainingTkns [][]rune) []rune {
@@ -573,7 +626,7 @@ func highlightText(input string, lexer chroma.Lexer) string {
 	return buf.String()
 }
 
-func getFromattedResp(resp map[string]interface{}) string {
+func getFromattedResp(resp map[string]any) string {
 	var jsonBuffer bytes.Buffer
 	enc := json.NewEncoder(&jsonBuffer)
 	enc.SetEscapeHTML(false)
@@ -622,38 +675,37 @@ func (vld *ValidationSchema) initialize(rawVlds json.RawMessage) {
 func getValidation(paramType string) (Validation, error) {
 	switch paramType {
 	case "int":
-		return &IntValidations{}, nil
+		return &IntValidations{Type: "int"}, nil
 	case "float":
-		return &FloatValidations{}, nil
+		return &FloatValidations{Type: "float"}, nil
 	case "string":
-		return &StrValidations{}, nil
+		return &StrValidations{Type: "string"}, nil
 	default:
 		return nil, fmt.Errorf(`invalid parameter type "%s"`, paramType)
 	}
 }
 
-func (r *ReqCmd) PopulateSchemasFromDraft() {
-	if r.RequestDraft == nil {
+func (rc *ReqCmd) PopulateSchemasFromDraft() {
+	if rc.RequestDraft == nil {
 		return
 	}
 
-	if r.ReqPropsSchema == nil {
-		r.ReqPropsSchema = &ReqPropsSchema{
+	if rc.ReqPropsSchema == nil {
+		rc.ReqPropsSchema = &ReqPropsSchema{
 			QueryParams: make(ValidationSchema),
 			Payload:     make(ValidationSchema),
 			UrlParams:   make(ValidationSchema),
 		}
 	}
 
-	r.populateQuerySchemaFromDraft()
-	r.ReqPropsSchema.Payload = populateSchemaFromJSONString(r.GetPayload())
+	rc.populateQuerySchemaFromDraft()
+	rc.ReqPropsSchema.Payload = populateSchemaFromJSONString(rc.GetPayload())
 }
 
-func (req *ReqCmd) cleanup() {
-}
+func (rc *ReqCmd) cleanup() {}
 
-func (r *ReqCmd) populateQuerySchemaFromDraft() {
-	schema := r.ReqPropsSchema
+func (rc *ReqCmd) populateQuerySchemaFromDraft() {
+	schema := rc.ReqPropsSchema
 	schema.QueryParams = make(ValidationSchema)
 
 	handlerFunc := func(key, value string) {
@@ -666,8 +718,8 @@ func (r *ReqCmd) populateQuerySchemaFromDraft() {
 		}
 	}
 
-	r.IterateQueryParams(handlerFunc)
-	schema.Payload = populateSchemaFromJSONString(r.RequestDraft.GetPayload())
+	rc.IterateQueryParams(handlerFunc)
+	schema.Payload = populateSchemaFromJSONString(rc.RequestDraft.GetPayload())
 }
 
 func inferTypeSchema(value any) Validation {
@@ -730,75 +782,95 @@ func populateSchemaFromJSONString(jsonString string) ValidationSchema {
 	return schema
 }
 
-func GetRawReqCfg() ([]byte, error) {
-	cfgFilePath := config.GetAppCfg().CfgFilePath()
-	return os.ReadFile(cfgFilePath)
+func loadConfig() (map[string]json.RawMessage, error) {
+	raw, err := GetRawReqCfg()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config.json: %w", err)
+	}
+
+	var cfg map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config.json: %w", err)
+	}
+	return cfg, nil
 }
 
-func marshalReqCmdCfg(reqCmd *ReqCmd, cmd string) ([]byte, error) {
-	var reqCmdCfg struct {
-		HttpMethod   string                `json:"httpMethod"`
-		Cmd          string                `json:"cmd"`
-		Url          string                `json:"url"`
-		QueryParams  map[string]Validation `json:"queryParams"`
-		UrlParams    map[string]Validation `json:"urlParams"`
-		Payload      map[string]Validation `json:"payload"`
-		RequestDraft *network.RequestDraft `json:"requestDraft"`
-	}
-
-	reqCmdCfg.Cmd = cmd
-	reqCmdCfg.Url = reqCmd.Url
-	reqCmdCfg.HttpMethod = string(reqCmd.Method)
-	reqCmdCfg.QueryParams = reqCmd.ReqPropsSchema.QueryParams
-	reqCmdCfg.UrlParams = reqCmd.ReqPropsSchema.UrlParams
-	reqCmdCfg.Payload = reqCmd.ReqPropsSchema.Payload
-	reqCmdCfg.RequestDraft = reqCmd.RequestDraft
-
-	encodedJson, err := json.MarshalIndent(reqCmdCfg, "", "  ")
+func saveConfig(cfg map[string]json.RawMessage) error {
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return nil, err
-	}
-	return encodedJson, nil
-}
-
-func SaveNewReqCmd(reqCmd *ReqCmd, cmd string) error {
-	encJsonCfg, err := marshalReqCmdCfg(reqCmd, cmd)
-	if err != nil {
-		return fmt.Errorf("failed to encode request config %w", err)
-	}
-	existingCfg, err := GetRawReqCfg()
-	if err != nil {
-		return fmt.Errorf("failed to get existing config %w", err)
-	}
-	var iCfg struct {
-		Requests []json.RawMessage `json:"requests"`
+		return fmt.Errorf("failed to serialize config: %w", err)
 	}
 
-	err = json.Unmarshal(existingCfg, &iCfg)
-	if err != nil {
-		return fmt.Errorf("invalid 'config.json' file: %w", err)
-	}
-
-	var fullCfg map[string]any
-	err = json.Unmarshal(existingCfg, &fullCfg)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal existin cfg: %w", err)
-	}
-
-	iCfg.Requests = append(iCfg.Requests, encJsonCfg)
-	fullCfg["requests"] = iCfg.Requests
-
-	finalCfg, err := json.MarshalIndent(fullCfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("error marshalling req config json %w", err)
-	}
-
-	cfgFilePath := config.GetAppCfg().CfgFilePath()
-	if err := os.WriteFile(cfgFilePath, finalCfg, 0644); err != nil {
-		return fmt.Errorf("failed to update 'config.json' %w", err)
+	path := config.GetAppCfg().CfgFilePath()
+	if err := os.WriteFile(path, bytes, 0644); err != nil {
+		return fmt.Errorf("failed to write config.json: %w", err)
 	}
 
 	return nil
+}
+
+func extractRequests(cfg map[string]json.RawMessage) ([]*ReqCmd, error) {
+	rawReqCfg, ok := cfg["requests"]
+	if !ok {
+		return []*ReqCmd{}, nil
+	}
+
+	var reqs []json.RawMessage
+	if err := json.Unmarshal(rawReqCfg, &reqs); err != nil {
+		return nil, err
+	}
+
+	reqCmds := make([]*ReqCmd, len(reqs))
+	for idx, r := range reqs {
+		rc := NewReqCmd("", nil)
+		if err := json.Unmarshal(r, rc); err != nil {
+			return nil, err
+		} else {
+			reqCmds[idx] = rc
+		}
+	}
+
+	return reqCmds, nil
+}
+
+func upsertRequest(requests []*ReqCmd, rc *ReqCmd) []*ReqCmd {
+	fqCmd := rc.GetFullyQualifiedName()
+
+	for i, r := range requests {
+		if r.Name() == fqCmd {
+			requests[i] = rc
+			return requests
+		}
+	}
+
+	return append(requests, rc)
+}
+
+func UpsertReqCfg(rc *ReqCmd) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	requests, err := extractRequests(cfg)
+	if err != nil {
+		return err
+	}
+
+	requests = upsertRequest(requests, rc)
+
+	if rcmdBytes, err := json.MarshalIndent(requests, "", "  "); err != nil {
+		return err
+	} else {
+		cfg["requests"] = rcmdBytes
+	}
+
+	return saveConfig(cfg)
+}
+
+func GetRawReqCfg() ([]byte, error) {
+	cfgFilePath := config.GetAppCfg().CfgFilePath()
+	return os.ReadFile(cfgFilePath)
 }
 
 // func populateSchemaFromJSONString(jsonString string) ValidationSchema {
@@ -825,5 +897,3 @@ func SaveNewReqCmd(reqCmd *ReqCmd, cmd string) error {
 // 	}
 // 	return schema
 // }
-
-

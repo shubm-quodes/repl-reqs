@@ -9,6 +9,8 @@ require (
 	golang.org/x/term v0.35.0
 )
 
+require github.com/BurntSushi/toml v1.5.0
+
 require (
 	github.com/alecthomas/chroma v0.10.0
 	github.com/briandowns/spinner v1.23.2

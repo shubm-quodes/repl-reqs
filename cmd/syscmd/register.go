@@ -29,5 +29,7 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 	dlt.AddSubCmd(&CmdDeleteVar{BaseCmd: cmd.NewBaseCmd(CmdDeleteVarName, "")}).
 		AddSubCmd(&CmdDeleteSeq{BaseCmd: cmd.NewBaseCmd(CmdDeleteSeqName, "")})
 
-	reg.RegisterCmd(s, n, send, ls, save, dlt)
+	edit := &CmdEdit{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditName, "")}}
+	edit.AddSubCmd(&CmdEditReq{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditReqName, "")}})
+	reg.RegisterCmd(s, n, send, ls, save, dlt, edit)
 }
