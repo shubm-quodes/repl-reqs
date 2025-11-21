@@ -62,7 +62,7 @@ func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 
 func (er *CmdEditReq) GetSuggestions(tokens [][]rune) ([][]rune, int) {
 	if len(tokens) == 0 {
-		return nil, 0
+		tokens = make([][]rune, 1)
 	}
 
 	firstToken := tokens[0]
@@ -73,7 +73,7 @@ func (er *CmdEditReq) GetSuggestions(tokens [][]rune) ([][]rune, int) {
 	hdlr := er.GetCmdHandler()
 	cmd, found := hdlr.GetCmdRegistry().GetCmdByName(string(firstToken))
 	if !found {
-		return hdlr.SuggestCmds(tokens)
+		return er.suggestRootCmds(tokens)
 	}
 
 	reqCmd, ok := cmd.(*ReqCmd)
@@ -94,6 +94,19 @@ func (er *CmdEditReq) GetSuggestions(tokens [][]rune) ([][]rune, int) {
 	return finalCmd.BaseCmd.GetSuggestions(remainingTokens)
 }
 
+func (er *CmdEditReq) suggestRootCmds(tokens [][]rune) ([][]rune, int) {
+	suggestions, offset := er.GetCmdHandler().SuggestCmds(tokens)
+	var filteredSugg [][]rune
+
+	for _, s := range suggestions {
+		if s[0] != '$' { // Filter sys cmds
+			filteredSugg = append(filteredSugg, s)
+		}
+	}
+
+	return filteredSugg, offset
+}
+
 func (er *CmdEditReq) isValidEdtReqCmdToken(token []rune) bool {
-	return len(token) != 0 || token[0] != '$'
+	return len(token) == 0 || token[0] != '$' 
 }
