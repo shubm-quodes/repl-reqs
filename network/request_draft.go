@@ -28,11 +28,11 @@ const (
 
 type RequestDraft struct {
 	id          string
-	Url         string            `json:"url"`
-	Method      HTTPMethod        `json:"method"`
-	Headers     map[string]string `json:"headers"`
-	QueryParams map[string]string `json:"queryParams"`
-	Payload     string            `json:"payload"`
+	Url         string            `json:"url"         toml:"url"`
+	Method      HTTPMethod        `json:"method"      toml:"method"`
+	Headers     map[string]string `json:"headers"     toml:"headers"`
+	QueryParams map[string]string `json:"queryParams" toml:"query_params"` // Different casing for TOML standard
+	Payload     string            `json:"payload"     toml:"payload"`
 }
 
 type FuncQueryParamHandler func(key, val string)
@@ -194,6 +194,10 @@ func (rd *RequestDraft) Finalize() (*http.Request, error) {
 
 func (r *RequestDraft) GetKey() string {
 	return r.id
+}
+
+func (r *RequestDraft) EditAsToml() error {
+	return util.EditToml(r, config.GetAppCfg().GetDefaultEditor())
 }
 
 func IsValidHttpVerb(verb HTTPMethod) bool {

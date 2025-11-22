@@ -53,28 +53,28 @@ func (sv *StrValidations) validate(value string) (any, error) {
 	return value, nil
 }
 
-func (arVld ArrValidation) validate(value string) (any, error) {
+func (arVld *ArrValidation) validate(value string) (any, error) {
 	str := []byte(fmt.Sprintf(`{"arr": %s}`, value)) // Hehehehuhuhu, am I Evil?
 	var arrWrapper map[string]any
 	json.Unmarshal(str, &arrWrapper)
 	return arrWrapper["arr"], arVld.validateArr(arrWrapper["arr"].([]any))
 }
 
-func (objVlds ObjValidation) validate(value string) (any, error) {
+func (objVlds *ObjValidation) validate(value string) (any, error) {
 	var obj map[string]any
 	json.Unmarshal([]byte(value), &obj)
 	return obj, objVlds.validateObj(obj)
 }
 
 func (objVlds *ObjValidation) validateObj(obj map[string]any) error {
-	for key, vld := range *objVlds {
+	for key, vld := range objVlds.fields {
 		return inferAndVld(vld, obj[key])
 	}
 	return nil
 }
 
 func (arrVlds *ArrValidation) validateArr(arr []any) error {
-	for idx, vld := range *arrVlds {
+	for idx, vld := range arrVlds.arr {
 		return inferAndVld(vld, arr[idx])
 	}
 	return nil

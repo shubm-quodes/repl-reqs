@@ -31,9 +31,15 @@ type IterableVld interface {
 	ArrValidation | ObjValidation
 }
 
-type ArrValidation []Validation
+type ArrValidation struct {
+	Type string
+	arr  []Validation
+}
 
-type ObjValidation map[string]Validation
+type ObjValidation struct {
+	Type   string
+	fields map[string]Validation
+}
 
 func (iv *IntValidations) InitializeParams(params map[string]interface{}) Validation {
 	if v, ok := params["minVal"].(float64); ok {
@@ -69,10 +75,10 @@ func (sv *StrValidations) InitializeParams(params map[string]interface{}) Valida
 	return sv
 }
 
-func (arr ArrValidation) InitializeParams(params map[string]interface{}) Validation {
+func (arr *ArrValidation) InitializeParams(params map[string]interface{}) Validation {
 	return arr
 }
 
-func (vld ObjValidation) InitializeParams(params map[string]interface{}) Validation {
+func (vld *ObjValidation) InitializeParams(params map[string]interface{}) Validation {
 	return nil
 }

@@ -680,6 +680,10 @@ func getValidation(paramType string) (Validation, error) {
 		return &FloatValidations{Type: "float"}, nil
 	case "string":
 		return &StrValidations{Type: "string"}, nil
+	case "object":
+		return &ObjValidation{Type: "object"}, nil
+	case "array":
+		return &ArrValidation{Type: "array"}, nil
 	default:
 		return nil, fmt.Errorf(`invalid parameter type "%s"`, paramType)
 	}
@@ -737,25 +741,22 @@ func inferTypeSchema(value any) Validation {
 		return &FloatValidations{Type: "float"}
 
 	case map[string]any:
-		objSchema := make(ObjValidation)
+		objVld := &ObjValidation{Type: "object", fields: map[string]Validation{}}
 		for key, subValue := range v {
-			objSchema[key] = inferTypeSchema(subValue)
+			objVld.fields[key] = inferTypeSchema(subValue)
 		}
-		return objSchema
+		return objVld
 
 	case []any:
-		var arrSchema ArrValidation
-
-		if len(v) > 0 {
-			arrSchema = make(ArrValidation, len(v))
-			for idx, item := range v {
-				if item != nil {
-					arrSchema[idx] = inferTypeSchema(item)
-					break
-				}
+		arrVld := &ArrValidation{Type: "array", arr: make([]Validation, len(v))}
+		for idx, item := range v {
+			if item != nil {
+				arrVld.arr[idx] = inferTypeSchema(item)
+				break
 			}
 		}
-		return arrSchema
+
+		return arrVld
 
 	default:
 		return &StrValidations{}

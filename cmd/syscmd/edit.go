@@ -2,7 +2,6 @@ package syscmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -30,31 +29,32 @@ type CmdEditReq struct {
 
 func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	ctx, tokens := cmdCtx.Ctx, cmdCtx.ExpandedTokens
+	var rd *network.RequestDraft
 
 	if len(tokens) == 0 {
-		return ctx, errors.New("please specify req name")
-	}
+		rd = er.Mgr.PeakRequestDraft(cmdCtx.ID())
+	} else {
+		hdlr := er.GetCmdHandler()
+		c, exists := hdlr.GetCmdRegistry().GetCmdByName(tokens[0])
+		if !exists {
+			return ctx, fmt.Errorf("invalid request command '%s'", strings.Join(tokens, " "))
+		}
 
-	hdlr := er.GetCmdHandler()
-	c, exists := hdlr.GetCmdRegistry().GetCmdByName(tokens[0])
-	if !exists {
-		return ctx, fmt.Errorf("invalid request command '%s'", strings.Join(tokens, " "))
-	}
+		remainingTokens, c := cmd.Walk(c, c.GetSubCmds(), util.StrArrToRune(tokens[1:]))
+		if len(remainingTokens) > 0 {
+			return ctx, fmt.Errorf("incomplete/invalid request command '%s'", strings.Join(tokens, " "))
+		}
 
-	remainingTokens, c := cmd.Walk(c, c.GetSubCmds(), util.StrArrToRune(tokens[1:]))
-	if len(remainingTokens) > 0 {
-		return ctx, fmt.Errorf("incomplete/invalid request command '%s'", strings.Join(tokens, " "))
-	}
+		req, ok := c.(*ReqCmd)
+		if !ok {
+			return ctx, fmt.Errorf("not a request command")
+		}
 
-	req, ok := c.(*ReqCmd)
-	if !ok {
-		return ctx, fmt.Errorf("not a request command")
-	}
-
-	rd := req.RequestDraft
-	if rd == nil {
-		rd = network.NewRequestDraft()
-		req.RequestDraft = rd
+		rd = req.RequestDraft
+		if rd == nil {
+			rd = network.NewRequestDraft()
+			req.RequestDraft = rd
+		}
 	}
 
 	return ctx, rd.EditAsToml()
@@ -108,5 +108,5 @@ func (er *CmdEditReq) suggestRootCmds(tokens [][]rune) ([][]rune, int) {
 }
 
 func (er *CmdEditReq) isValidEdtReqCmdToken(token []rune) bool {
-	return len(token) == 0 || token[0] != '$' 
+	return len(token) == 0 || token[0] != '$'
 }

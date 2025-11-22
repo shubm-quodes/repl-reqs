@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 )
@@ -27,7 +28,12 @@ type EditorConfig struct {
 }
 
 func NewTempFile(fileName string) (*os.File, error) {
-	return os.CreateTemp("", fileName)
+	baseName := filepath.Base(fileName)
+	ext := filepath.Ext(baseName)
+
+	prefix := baseName[:len(baseName)-len(ext)]
+	pattern := prefix + "*" + ext
+	return os.CreateTemp("", pattern)
 }
 
 func OpenFileInEditor(file *os.File, editor string) error {
@@ -116,7 +122,31 @@ func TomlDecoder(data []byte, v any) error {
 func EditToml(data any, editor string) error {
 	cfg := EditorConfig{
 		TargetDataStructure: data,
-		FileName:            "toml",
+		FileName:            "reql-reqs.req.toml",
+		Editor:              editor,
+		Encoder:             TomlEncoder,
+		Decoder:             TomlDecoder,
+	}
+
+	return EditorWorkflow(cfg)
+}
+
+func EditJSON(data any, editor string) error {
+	cfg := EditorConfig{
+		TargetDataStructure: data,
+		FileName:            "reql-reqs.payload.json",
+		Editor:              editor,
+		Encoder:             TomlEncoder,
+		Decoder:             TomlDecoder,
+	}
+
+	return EditorWorkflow(cfg)
+}
+
+func EditXML(data any, editor string) error {
+	cfg := EditorConfig{
+		TargetDataStructure: data,
+		FileName:            "reql-reqs.payload.xml",
 		Editor:              editor,
 		Encoder:             TomlEncoder,
 		Decoder:             TomlDecoder,

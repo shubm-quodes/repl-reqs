@@ -170,14 +170,13 @@ func (rm *RequestManager) CycleRequests(context string) (*Request, error) {
 	}
 
 	requests := lru.GetAll()
-	if len(requests) <= 1 {
+	listSize := len(requests)
+
+	if listSize <= 1 {
 		return nil, nil
 	}
 
-	currentIndex := 0
-
-	nextIndex := (currentIndex + 1) % len(requests)
-	nextRequest := requests[nextIndex]
+	nextRequest := requests[listSize-1]
 
 	lru.AddOrTouch(nextRequest)
 
