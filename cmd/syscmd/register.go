@@ -10,7 +10,7 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 		AddSubCmd(&CmdHeader{NewBaseReqCmd(CmdHeaderName)}).
 		AddSubCmd(&CmdMultiHeaders{BaseReqCmd: NewBaseReqCmd(CmdMultiHeadersName)}).
 		AddSubCmd(&CmdHTTPVerb{NewBaseReqCmd(CmdHTTPVerbName)}).
-		AddSubCmd(&CmdPayload{NewBaseReqCmd(CmdPayloadName)}).
+		AddSubCmd(&CmdBody{NewBaseReqCmd(CmdBodyName)}).
 		AddSubCmd(&CmdPrompt{cmd.NewBaseCmd(CmdPromptName, "")}).
 		AddSubCmd(&CmdMascot{cmd.NewBaseCmd(CmdMascotName, "")}).
 		AddSubCmd(&CmdQuery{NewBaseReqCmd(CmdQueryName)})

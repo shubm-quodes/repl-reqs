@@ -49,7 +49,7 @@ type ReqCmdCfg struct {
 	Headers     map[string]string `json:"headers"`
 	QueryParams any               `json:"queryParams"`
 	UrlParams   any               `json:"urlParams"`
-	Payload     any               `json:"payload"`
+	Body        any               `json:"body"`
 	Cmd         string            `json:"cmd"`
 }
 

@@ -32,7 +32,7 @@ type RequestDraft struct {
 	Method      HTTPMethod        `json:"method"      toml:"method"`
 	Headers     map[string]string `json:"headers"     toml:"headers"`
 	QueryParams map[string]string `json:"queryParams" toml:"query_params"` // Different casing for TOML standard
-	Payload     string            `json:"payload"     toml:"payload"`
+	Body        string            `json:"body"        toml:"body"`
 }
 
 type FuncQueryParamHandler func(key, val string)
@@ -69,8 +69,8 @@ func (rd *RequestDraft) GetQueryParam(key string) string {
 	return ""
 }
 
-func (rd *RequestDraft) GetPayload() string {
-	return rd.Payload
+func (rd *RequestDraft) GetBody() string {
+	return rd.Body
 }
 
 func (rd *RequestDraft) SetUrl(url string) *RequestDraft {
@@ -101,8 +101,8 @@ func (rd *RequestDraft) SetQueryParam(key, val string) *RequestDraft {
 	return rd
 }
 
-func (rd *RequestDraft) SetPayload(payload string) *RequestDraft {
-	rd.Payload = payload
+func (rd *RequestDraft) SetBody(body string) *RequestDraft {
+	rd.Body = body
 	return rd
 }
 
@@ -179,14 +179,14 @@ func (rd *RequestDraft) Finalize() (*http.Request, error) {
 	}
 
 	req.URL.RawQuery = query.Encode()
-	parsedPayload, err := util.ReplaceStrPattern(rd.Payload, config.VarPattern, lookups)
+	parsedBody, err := util.ReplaceStrPattern(rd.Body, config.VarPattern, lookups)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(parsedPayload) > 0 {
-		req.Body = io.NopCloser(strings.NewReader(parsedPayload))
-		req.ContentLength = int64(len(parsedPayload))
+	if len(parsedBody) > 0 {
+		req.Body = io.NopCloser(strings.NewReader(parsedBody))
+		req.ContentLength = int64(len(parsedBody))
 	}
 
 	return req, nil

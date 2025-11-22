@@ -38,7 +38,7 @@ type ValidationSchema map[string]Validation
 type ReqPropsSchema struct {
 	QueryParams ValidationSchema `json:"queryParams"`
 	UrlParams   ValidationSchema `json:"urlParams"`
-	Payload     ValidationSchema `json:"payload"`
+	Body        ValidationSchema `json:"body"`
 }
 
 type ReqProps struct {
@@ -66,20 +66,14 @@ type ReqCmdCfg struct {
 	Url          string                `json:"url"`
 	QueryParams  map[string]Validation `json:"queryParams"`
 	UrlParams    map[string]Validation `json:"urlParams"`
-	Payload      map[string]Validation `json:"payload"`
+	Body         map[string]Validation `json:"body"`
 	RequestDraft *network.RequestDraft `json:"requestDraft"`
 }
 
-type ReqData struct {
-	queryParams KeyValPair
-	Headers     KeyValPair
-	Payload     map[string]any
-}
-
 type CmdParams struct {
-	URL     map[string]string
-	Query   map[string]string
-	Payload map[string]any
+	URL   map[string]string
+	Query map[string]string
+	Body  map[string]any
 }
 
 var StopSpinnerChannel chan bool = make(chan bool)
@@ -107,7 +101,7 @@ func NewReqCmd(name string, mgr *network.RequestManager) *ReqCmd {
 		ReqPropsSchema: &ReqPropsSchema{
 			QueryParams: make(ValidationSchema),
 			UrlParams:   make(ValidationSchema),
-			Payload:     make(ValidationSchema),
+			Body:        make(ValidationSchema),
 		},
 		RequestDraft: &network.RequestDraft{},
 	}
@@ -120,7 +114,7 @@ func NewReqCfgFromCmd(rc *ReqCmd) *ReqCmdCfg {
 		HttpMethod:   string(rc.Method),
 		QueryParams:  rc.ReqPropsSchema.QueryParams,
 		UrlParams:    rc.ReqPropsSchema.UrlParams,
-		Payload:      rc.ReqPropsSchema.Payload,
+		Body:         rc.ReqPropsSchema.Body,
 		RequestDraft: rc.RequestDraft,
 	}
 }
@@ -206,7 +200,7 @@ func (r *ReqCmd) UnmarshalJSON(data []byte) error {
 		Headers        KeyValPair         `json:"headers"`
 		RawQueryParams json.RawMessage    `json:"queryParams"`
 		RawUrlParams   json.RawMessage    `json:"urlParams"`
-		RawPayload     json.RawMessage    `json:"payload"`
+		RawBody        json.RawMessage    `json:"body"`
 	}
 
 	if err := json.Unmarshal(data, &rawProps); err != nil {
@@ -221,7 +215,7 @@ func (r *ReqCmd) UnmarshalJSON(data []byte) error {
 	r.initializeVlds(
 		rawProps.RawUrlParams,
 		rawProps.RawQueryParams,
-		rawProps.RawPayload,
+		rawProps.RawBody,
 	)
 	return nil
 }
@@ -303,11 +297,11 @@ func (rc *ReqCmd) register(
 }
 
 func (rc *ReqCmd) initializeVlds(
-	rawUrlParams, rawQueryParams, rawPayload json.RawMessage,
+	rawUrlParams, rawQueryParams, rawBody json.RawMessage,
 ) {
 	rc.UrlParams.initialize(rawUrlParams)
 	rc.ReqPropsSchema.QueryParams.initialize(rawQueryParams)
-	rc.ReqPropsSchema.Payload.initialize(rawPayload)
+	rc.ReqPropsSchema.Body.initialize(rawBody)
 }
 
 func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
@@ -317,9 +311,9 @@ func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
 	}
 
 	cmdParams := &CmdParams{
-		URL:     make(map[string]string),
-		Query:   make(map[string]string),
-		Payload: make(map[string]any),
+		URL:   make(map[string]string),
+		Query: make(map[string]string),
+		Body:  make(map[string]any),
 	}
 
 	processedKeys := make(map[string]bool)
@@ -354,7 +348,7 @@ func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
 		if processedKeys[key] {
 			continue
 		}
-		if err := validate(key, value, rc.ReqPropsSchema.Payload, cmdParams.Payload); err != nil {
+		if err := validate(key, value, rc.ReqPropsSchema.Body, cmdParams.Body); err != nil {
 			return nil, err
 		}
 		if processedKeys[key] {
@@ -385,12 +379,12 @@ func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 	u.RawQuery = q.Encode()
 
 	var reqBody io.Reader
-	if len(cmdParams.Payload) > 0 {
-		payloadBytes, err := json.Marshal(cmdParams.Payload)
+	if len(cmdParams.Body) > 0 {
+		bodyBytes, err := json.Marshal(cmdParams.Body)
 		if err != nil {
-			return nil, fmt.Errorf("error marshalling payload: %w", err)
+			return nil, fmt.Errorf("error marshalling body: %w", err)
 		}
-		reqBody = bytes.NewReader(payloadBytes)
+		reqBody = bytes.NewReader(bodyBytes)
 	}
 
 	req, err := http.NewRequest(string(draft.Method), u.String(), reqBody)
@@ -505,7 +499,7 @@ func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
 		return
 	}
 	schema := rc.ReqPropsSchema
-	params := []ValidationSchema{schema.QueryParams, schema.UrlParams, schema.Payload}
+	params := []ValidationSchema{schema.QueryParams, schema.UrlParams, schema.Body}
 	criteria := &util.MatchCriteria[Validation]{
 		Search:     string(search),
 		SuffixWith: "=",
@@ -697,13 +691,13 @@ func (rc *ReqCmd) PopulateSchemasFromDraft() {
 	if rc.ReqPropsSchema == nil {
 		rc.ReqPropsSchema = &ReqPropsSchema{
 			QueryParams: make(ValidationSchema),
-			Payload:     make(ValidationSchema),
+			Body:        make(ValidationSchema),
 			UrlParams:   make(ValidationSchema),
 		}
 	}
 
 	rc.populateQuerySchemaFromDraft()
-	rc.ReqPropsSchema.Payload = populateSchemaFromJSONString(rc.GetPayload())
+	rc.ReqPropsSchema.Body = populateSchemaFromJSONString(rc.GetBody())
 }
 
 func (rc *ReqCmd) cleanup() {}
@@ -723,7 +717,7 @@ func (rc *ReqCmd) populateQuerySchemaFromDraft() {
 	}
 
 	rc.IterateQueryParams(handlerFunc)
-	schema.Payload = populateSchemaFromJSONString(rc.RequestDraft.GetPayload())
+	schema.Body = populateSchemaFromJSONString(rc.RequestDraft.GetBody())
 }
 
 func inferTypeSchema(value any) Validation {
@@ -765,18 +759,18 @@ func inferTypeSchema(value any) Validation {
 
 func populateSchemaFromJSONString(jsonString string) ValidationSchema {
 	schema := make(ValidationSchema)
-	var payloadMap map[string]any
+	var bodyMap map[string]any
 
 	if jsonString == "" {
 		return schema
 	}
 
-	if err := json.Unmarshal([]byte(jsonString), &payloadMap); err != nil {
+	if err := json.Unmarshal([]byte(jsonString), &bodyMap); err != nil {
 		fmt.Printf("Error unmarshalling JSON: %v\n", err)
 		return schema
 	}
 
-	for key, value := range payloadMap {
+	for key, value := range bodyMap {
 		schema[key] = inferTypeSchema(value)
 	}
 
@@ -873,28 +867,3 @@ func GetRawReqCfg() ([]byte, error) {
 	cfgFilePath := config.GetAppCfg().CfgFilePath()
 	return os.ReadFile(cfgFilePath)
 }
-
-// func populateSchemaFromJSONString(jsonString string) ValidationSchema {
-// 	schema := make(ValidationSchema)
-// 	var payloadMap map[string]any
-//
-// 	if jsonString == "" || json.Unmarshal([]byte(jsonString), &payloadMap) != nil {
-// 		return schema
-// 	}
-//
-// 	for key, value := range payloadMap {
-// 		switch value.(type) {
-// 		case string:
-// 			schema[key] = &StrValidations{}
-// 		case int, float64:
-// 			if _, isInt := value.(int); isInt || float64(int(value.(float64))) == value.(float64) {
-// 				schema[key] = &IntValidations{}
-// 			} else {
-// 				schema[key] = &FloatValidations{}
-// 			}
-// 		default:
-// 			schema[key] = &StrValidations{}
-// 		}
-// 	}
-// 	return schema
-// }

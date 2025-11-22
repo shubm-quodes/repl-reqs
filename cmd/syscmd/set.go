@@ -29,7 +29,7 @@ const (
 	CmdHeaderName       = "header"
 	CmdMultiHeadersName = "multi-headers"
 	CmdHTTPVerbName     = "httpVerb"
-	CmdPayloadName      = "payload"
+	CmdBodyName         = "body"
 	CmdPromptName       = "prompt"
 	CmdMascotName       = "mascot"
 )
@@ -60,7 +60,7 @@ type CmdHTTPVerb struct {
 	*BaseReqCmd
 }
 
-type CmdPayload struct {
+type CmdBody struct {
 	*BaseReqCmd
 }
 
