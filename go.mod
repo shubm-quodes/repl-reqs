@@ -4,12 +4,11 @@ go 1.24.0
 
 toolchain go1.24.7
 
-require (
-	github.com/chzyer/readline v1.5.1
-	golang.org/x/term v0.35.0
-)
+require golang.org/x/term v0.35.0
 
 require github.com/BurntSushi/toml v1.5.0
+
+require github.com/shubm-quodes/readline v1.5.3
 
 require (
 	github.com/alecthomas/chroma v0.10.0

@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
-	"github.com/chzyer/readline"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
+	"github.com/shubm-quodes/readline"
 	"github.com/shubm-quodes/repl-reqs/config"
 	"github.com/shubm-quodes/repl-reqs/util"
 )
@@ -28,10 +28,6 @@ type Cmd interface {
 
 	GetFullyQualifiedName() string
 
-	setHandler(CmdHandler)
-
-	SetParent(Cmd)
-
 	GetCmdHandler() CmdHandler
 
 	GetSuggestions(tokens [][]rune) (suggestions [][]rune, offset int)
@@ -42,6 +38,14 @@ type Cmd interface {
 
 	GetInModeCmds() SubCmd
 
+	GetTaskStatus() *TaskStatus
+
+	setHandler(CmdHandler)
+
+	SetParent(Cmd)
+
+	SetTaskStatus(*TaskStatus)
+
 	AddSubCmd(cmd Cmd) Cmd
 
 	AddInModeCmd(cmd Cmd) Cmd
@@ -51,10 +55,6 @@ type Cmd interface {
 	filterSuggestions(partial string, offset int) [][]rune
 
 	Execute(*CmdCtx) (context.Context, error)
-
-	SetTaskStatus(*TaskStatus)
-
-	GetTaskStatus() *TaskStatus
 
 	cleanup()
 }
@@ -394,24 +394,17 @@ func (h *ReplCmdHandler) GetRootCmd(tokens []string) (Cmd, []string, error) {
 }
 
 func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, tokens []string) (Cmd, []string) {
-	var (
-		finalCmd      Cmd
-		remainingTkns [][]rune
-	)
+	subCmds := rootCmd.GetSubCmds()
 
 	if h.GetCurrentModeCmd() != nil {
-		remainingTkns, finalCmd = Walk(
-			rootCmd,
-			rootCmd.GetInModeCmds(),
-			util.StrArrToRune(tokens),
-		)
-	} else {
-		remainingTkns, finalCmd = Walk(
-			rootCmd,
-			rootCmd.GetSubCmds(),
-			util.StrArrToRune(tokens),
-		)
+		subCmds = rootCmd.GetInModeCmds()
 	}
+
+	remainingTkns, finalCmd := Walk(
+		rootCmd,
+		subCmds,
+		util.StrArrToRune(tokens),
+	)
 
 	args := tokens[len(tokens)-len(remainingTkns):]
 

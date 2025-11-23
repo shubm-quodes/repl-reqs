@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"slices"
 
-	"github.com/chzyer/readline"
+	"github.com/shubm-quodes/readline"
 	"github.com/shubm-quodes/repl-reqs/log"
 	"github.com/shubm-quodes/repl-reqs/util"
 )

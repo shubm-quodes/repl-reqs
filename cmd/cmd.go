@@ -19,31 +19,39 @@ type CmdCtx struct {
 }
 
 type CmdHandler interface {
-	SuggestCmds(tokens [][]rune) ([][]rune, int)
-
-	SuggestSequences(partial string) [][]rune
-
-	SuggestVarNames(partial string) [][]rune
-
 	GetCurrentModeCmd() Cmd
 
 	GetCurrentCmdMode() *CmdMode
 
 	GetSequence(name string) (Sequence, error)
 
-	PushCmdMode(promptName string, cm Cmd, allowRootCmdSugg bool)
-
-	ExitCmdMode() bool
-
-	UpdatePromptEnv()
-
 	GetAppCfg() *config.AppCfg
+
+	GetUpdateChan() chan<- TaskStatus
+
+	GetCmdRegistry() *CmdRegistry
+
+	GetDefaultCtx() context.Context
 
 	SetPrompt(prompt, mascot string)
 
 	SetIsRecMode(bool)
 
-	GetUpdateChan() chan<- TaskStatus
+	SuggestCmds(tokens [][]rune) ([][]rune, int)
+
+	SuggestSequences(partial string) [][]rune
+
+	SuggestVarNames(partial string) [][]rune
+
+	HandleRootCmd(ctx context.Context, tokens []string) (context.Context, error)
+
+	HandleCmd(ctx context.Context, tokens []string) (context.Context, error)
+
+	PushCmdMode(promptName string, cm Cmd, allowRootCmdSugg bool)
+
+	ExitCmdMode() bool
+
+	UpdatePromptEnv()
 
 	ListTasks()
 
@@ -52,14 +60,6 @@ type CmdHandler interface {
 	RegisterSequence(sequenceName string) error
 
 	SaveSequenceStep(sequenceName string, step *Step) error
-
-	GetDefaultCtx() context.Context
-
-	HandleRootCmd(ctx context.Context, tokens []string) (context.Context, error)
-
-	HandleCmd(ctx context.Context, tokens []string) (context.Context, error)
-
-	GetCmdRegistry() *CmdRegistry
 
 	FinalizeSequence(name string) error
 
