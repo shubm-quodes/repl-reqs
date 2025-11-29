@@ -57,6 +57,9 @@ func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 		}
 	}
 
+	if er.Mgr.PeakRequestDraft(cmdCtx.ID()) != rd {
+		er.Mgr.AddDraftRequest(cmdCtx.ID(), rd)
+	}
 	return ctx, rd.EditAsToml()
 }
 
