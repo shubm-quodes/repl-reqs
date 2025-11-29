@@ -41,14 +41,6 @@ type ReqPropsSchema struct {
 	Body        ValidationSchema `json:"body"`
 }
 
-type ReqProps struct {
-	Url        string             `json:"url"`
-	HttpMethod network.HTTPMethod `json:"httpMethod"`
-	Headers    KeyValPair         `json:"headers"`
-	*ReqPropsSchema
-	*network.RequestDraft
-}
-
 type BaseReqCmd struct {
 	*cmd.BaseCmd
 	Mgr *network.RequestManager
@@ -194,13 +186,13 @@ func injectReqMgrIntoSubCmds(reg map[string]cmd.Cmd, mgr *network.RequestManager
 
 func (r *ReqCmd) UnmarshalJSON(data []byte) error {
 	var rawProps struct {
-		Cmd            string             `json:"cmd"`
-		Url            string             `json:"url"`
-		HttpMethod     network.HTTPMethod `json:"httpMethod"`
-		Headers        KeyValPair         `json:"headers"`
-		RawQueryParams json.RawMessage    `json:"queryParams"`
-		RawUrlParams   json.RawMessage    `json:"urlParams"`
-		RawBody        json.RawMessage    `json:"body"`
+		Cmd            string                     `json:"cmd"`
+		Url            string                     `json:"url"`
+		HttpMethod     network.HTTPMethod         `json:"httpMethod"`
+		Headers        KeyValPair                 `json:"headers"`
+		RawQueryParams map[string]json.RawMessage `json:"queryParams"`
+		RawUrlParams   map[string]json.RawMessage `json:"urlParams"`
+		RawBody        map[string]json.RawMessage `json:"body"`
 	}
 
 	if err := json.Unmarshal(data, &rawProps); err != nil {
@@ -212,11 +204,14 @@ func (r *ReqCmd) UnmarshalJSON(data []byte) error {
 		SetMethod(rawProps.HttpMethod).
 		SetHeaders(rawProps.Headers)
 
-	r.initializeVlds(
+	if err := r.initializeVlds(
 		rawProps.RawUrlParams,
 		rawProps.RawQueryParams,
 		rawProps.RawBody,
-	)
+	); err != nil {
+		log.Warn("invalid validation specification for %s: %s", r.Name_, err.Error())
+	}
+
 	return nil
 }
 
@@ -297,11 +292,42 @@ func (rc *ReqCmd) register(
 }
 
 func (rc *ReqCmd) initializeVlds(
-	rawUrlParams, rawQueryParams, rawBody json.RawMessage,
-) {
-	rc.UrlParams.initialize(rawUrlParams)
-	rc.ReqPropsSchema.QueryParams.initialize(rawQueryParams)
-	rc.ReqPropsSchema.Body.initialize(rawBody)
+	rawUrlParams, rawQueryParams, rawBody map[string]json.RawMessage,
+) error {
+	var err error
+	if rc.UrlParams, err = constructValidationSchema(rawUrlParams); err != nil {
+		return fmt.Errorf("failed to construct validation schema for url params %w", err)
+	}
+
+	if rc.ReqPropsSchema.QueryParams, err = constructValidationSchema(rawQueryParams); err != nil {
+		return fmt.Errorf("failed to construct validation schema for query params %w", err)
+	}
+
+	return rc.constructBodyVldSchema(rawBody)
+}
+
+func (rc *ReqCmd) constructBodyVldSchema(rawBody map[string]json.RawMessage) error {
+	var (
+		bodySchema map[string]json.RawMessage
+		err        error
+	)
+
+	if rawBodySchema, ok := rawBody["schema"]; !ok {
+		log.Debug(
+			"body schema not specified for req cmd '%s'. skipping validation loading",
+			rc.Name(),
+		)
+		return nil
+	} else {
+		err = json.Unmarshal(rawBodySchema, &bodySchema)
+		if err != nil {
+			return err
+		}
+		if rc.ReqPropsSchema.Body, err = constructValidationSchema(bodySchema); err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
 func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
@@ -630,57 +656,6 @@ func getFromattedResp(resp map[string]any) string {
 	lexer := lexers.Get("json")
 	respStr := jsonBuffer.String()
 	return highlightText(respStr, lexer)
-}
-
-func (vld *ValidationSchema) initialize(rawVlds json.RawMessage) {
-	var rawMap map[string]json.RawMessage
-	if err := json.Unmarshal(rawVlds, &rawMap); err != nil {
-		log.Error(`Failed to initialize params: %s`, err.Error())
-		os.Exit(1)
-	}
-
-	if *vld == nil {
-		(*vld) = ValidationSchema{}
-	}
-
-	for paramName, val := range rawMap {
-		var vldType struct {
-			Type string `json:"type"`
-		}
-
-		if err := json.Unmarshal(val, &vldType); err != nil {
-			log.Error(
-				`Failed to initialize validations for "%s":`,
-				paramName,
-				err.Error(),
-			)
-			os.Exit(1)
-		}
-
-		if v, err := getValidation(vldType.Type); err != nil {
-			log.Error(err.Error())
-			os.Exit(1)
-		} else {
-			(*vld)[paramName] = v
-		}
-	}
-}
-
-func getValidation(paramType string) (Validation, error) {
-	switch paramType {
-	case "int":
-		return &IntValidations{Type: "int"}, nil
-	case "float":
-		return &FloatValidations{Type: "float"}, nil
-	case "string":
-		return &StrValidations{Type: "string"}, nil
-	case "object":
-		return &ObjValidation{Type: "object"}, nil
-	case "array":
-		return &ArrValidation{Type: "array"}, nil
-	default:
-		return nil, fmt.Errorf(`invalid parameter type "%s"`, paramType)
-	}
 }
 
 func (rc *ReqCmd) PopulateSchemasFromDraft() {
