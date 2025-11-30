@@ -108,60 +108,6 @@ func getValidation(cfg json.RawMessage) (Validation, error) {
 	return vld, nil
 }
 
-// func getValidation(cfg json.RawMessage) (Validation, error) {
-// 	var (
-// 		paramType struct {
-// 			Type string `json:"type"`
-// 		}
-// 		isShortHand bool
-// 	)
-//
-// 	json.Unmarshal(cfg, &paramType)
-// 	if paramType.Type == "" { // If it's empty, make one more attempt and check if it's a shorthand
-// 		json.Unmarshal(cfg, &paramType.Type)
-// 		isShortHand = true
-// 	}
-//
-// 	var vld Validation
-// 	switch paramType.Type {
-// 	case "int":
-// 		vld = &IntValidations{}
-// 	case "float":
-// 		vld = &FloatValidations{}
-// 	case "string":
-// 		vld = &StrValidations{}
-// 	case "object", "json":
-// 		var objVldSchema struct {
-// 			Schema map[string]json.RawMessage `json:"schema"`
-// 		}
-//
-// 		if err := json.Unmarshal(cfg, &objVldSchema); err != nil {
-// 			return nil, err
-// 		}
-// 		o := &ObjValidation{fields: make(map[string]Validation)}
-// 		if schema, err := constructValidationSchema(objVldSchema.Schema); err != nil {
-// 			return nil, err
-// 		} else {
-// 			o.fields = schema
-// 		}
-// 		return o, nil
-// 	case "array":
-// 		vld = &ArrValidation{}
-// 	default:
-// 		return nil, fmt.Errorf(`invalid parameter type "%s"`, paramType.Type)
-// 	}
-//
-// 	if isShortHand {
-// 		return vld, nil
-// 	}
-//
-// 	if err := json.Unmarshal(cfg, vld); err != nil {
-// 		return nil, err
-// 	} else {
-// 		return vld, nil
-// 	}
-// }
-
 func constructValidationSchema(cfg map[string]json.RawMessage) (ValidationSchema, error) {
 	schema := make(ValidationSchema)
 
