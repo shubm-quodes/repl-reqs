@@ -31,3 +31,7 @@ func (d *draftReqCmd) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	d.GetCmdHandler().SetPrompt(prompt, "")
 	return cmdCtx.Ctx, nil
 }
+
+func (d *draftReqCmd) AllowInModeWithoutArgs() bool {
+	return false
+}

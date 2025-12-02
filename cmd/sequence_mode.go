@@ -56,6 +56,10 @@ func (sv *CmdFinalizeRec) Execute(cmdCtx *CmdCtx) (context.Context, error) {
 	}
 }
 
+func (fr *CmdFinalizeRec) AllowInModeWithoutArgs() bool {
+	return false
+}
+
 func (sv *CmdFinalizeRec) saveSequence(seq Sequence, name string) error {
 	sequenceCfg, err := sv.loadPreExistingSequences()
 	if err != nil {

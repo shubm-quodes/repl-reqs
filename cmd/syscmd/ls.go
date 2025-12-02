@@ -25,19 +25,28 @@ type CmdLs struct {
 }
 
 type CmdLsVars struct {
-	*cmd.BaseCmd
+	*cmd.BaseNonModeCmd
 }
 
 type CmdLsTasks struct {
-	*cmd.BaseCmd
+	*cmd.BaseNonModeCmd
 }
 
 type CmdLsSequences struct {
-	*cmd.BaseCmd
+	*cmd.BaseNonModeCmd
 }
 
 func (ls *CmdLsVars) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
-	envVars := config.GetEnvManager().GetActiveEnvVars()
+	envMgr := config.GetEnvManager()
+	envVars := envMgr.GetActiveEnvVars()
+
+	if len(envVars) == 0 {
+		fmt.Printf(
+			"\nNo variables in the currently active env: '%s' 🫤\n\n",
+			envMgr.GetActiveEnvName(),
+		)
+		return cmdCtx.Ctx, nil
+	}
 
 	keys := make([]string, 0, len(envVars))
 	for name := range envVars {
@@ -46,6 +55,10 @@ func (ls *CmdLsVars) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 
 	sort.Strings(keys)
 
+	fmt.Printf(
+		"\n📦 Variables - (In currently active environment: '%s')\n\n",
+		envMgr.GetActiveEnvName(),
+	)
 	for i, name := range keys {
 		value := envVars[name]
 		fmt.Printf("%d. %s: %s\n", i+1, name, util.GetTruncatedStr(value))

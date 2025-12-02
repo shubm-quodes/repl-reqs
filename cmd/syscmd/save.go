@@ -29,11 +29,18 @@ func (s *CmdSave) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	reqCmd.RequestDraft = s.Mgr.PeakRequestDraft(cmdCtx.ID())
 	reqCmd.PopulateSchemasFromDraft()
 
-	reqCmd.register(strings.Join(tokens, " "), s.GetCmdHandler(), s.Mgr)
+	hdlr := s.GetCmdHandler()
+
+	reqCmd.register(strings.Join(tokens, " "), hdlr, s.Mgr)
 	if err := UpsertReqCfg(reqCmd); err != nil {
 		return ctx, err
 	}
 
+	hdlr.Inject(reqCmd)
 	fmt.Println("request saved successfully")
 	return ctx, nil
+}
+
+func (s *CmdSave) AllowInModeWithoutArgs() bool {
+	return false
 }

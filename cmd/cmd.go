@@ -47,7 +47,7 @@ type CmdHandler interface {
 
 	HandleCmd(ctx context.Context, tokens []string) (context.Context, error)
 
-	PushCmdMode(promptName string, cm Cmd, allowRootCmdSugg bool)
+	PushCmdMode(cm Cmd)
 
 	ExitCmdMode() bool
 
@@ -64,6 +64,8 @@ type CmdHandler interface {
 	FinalizeSequence(name string) error
 
 	DiscardSequence(name string) error
+
+	Inject(c Cmd)
 }
 
 type BaseCmd struct {
@@ -76,12 +78,25 @@ type BaseCmd struct {
 	taskStatus *TaskStatus
 }
 
+type BaseNonModeCmd struct {
+	*BaseCmd
+}
+
 type SubCmd map[string]Cmd
 
 func NewBaseCmd(name, desc string) *BaseCmd {
 	return &BaseCmd{
 		Name_: name,
 		Desc_: desc,
+	}
+}
+
+func NewBaseNonModeCmd(name, desc string) *BaseNonModeCmd {
+	return &BaseNonModeCmd{
+		&BaseCmd{
+			Name_: name,
+			Desc_: desc,
+		},
 	}
 }
 
@@ -121,6 +136,10 @@ func (b *BaseCmd) GetSubCmdList() []string {
 	return subCmds
 }
 
+func (b *BaseCmd) GetModeName() string {
+	return b.Name()
+}
+
 func (b *BaseCmd) GetTaskStatus() *TaskStatus {
 	return b.taskStatus
 }
@@ -150,6 +169,18 @@ func (b *BaseCmd) AddInModeCmd(cmd Cmd) Cmd {
 	b.InModeCmds[cmd.Name()] = cmd
 	cmd.SetParent(b)
 	return b
+}
+
+func (b *BaseCmd) AllowInModeWithoutArgs() bool {
+	return true // By default allow in mode.
+}
+
+func (b *BaseNonModeCmd) AllowInModeWithoutArgs() bool {
+	return false // By default allow in mode.
+}
+
+func (b *BaseCmd) AllowRootCmdsWhileInMode() bool {
+	return false
 }
 
 func Walk(
@@ -256,7 +287,7 @@ func (c *BaseCmd) getSuggestions(
 func (c *BaseCmd) Execute(cmdCtx *CmdCtx) (context.Context, error) {
 	hdlr := c.GetCmdHandler()
 	if hdlr.GetCurrentModeCmd() != c {
-		hdlr.PushCmdMode(c.Name_, c, false)
+		hdlr.PushCmdMode(c)
 	}
 	return cmdCtx.Ctx, nil
 }

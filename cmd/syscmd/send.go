@@ -35,3 +35,7 @@ func (s *CmdSend) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 		s.MakeRequest(req)
 	}
 }
+
+func (s *CmdSend) AllowInModeWithoutArgs() bool {
+	return false
+}

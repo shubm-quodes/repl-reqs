@@ -68,9 +68,16 @@ func (cr *CmdRec) enableRecMode(tokens []string) error {
 	if err := cr.registerNewSequence(sequenceName); err != nil {
 		return err
 	}
-	cr.GetCmdHandler().
-		PushCmdMode(fmt.Sprintf("rec(%s) 🔴 step #1", strings.Join(tokens, " ")), cr, true)
+	cr.GetCmdHandler().PushCmdMode(cr)
 	return nil
+}
+
+func (cr *CmdRec) GetModeName() string {
+	return fmt.Sprintf("rec(%s) 🔴 step #1", cr.currSequenceName)
+}
+
+func (cr *CmdRec) AllowRootCmdsWhileInMode() bool {
+	return true
 }
 
 func (cr *CmdRec) handleSequenceCmd(tokens []string) error {
@@ -85,10 +92,6 @@ func (cr *CmdRec) handleSequenceCmd(tokens []string) error {
 	return hdlr.SaveSequenceStep(cr.currSequenceName, &Step{
 		Cmd: tokens,
 	})
-}
-
-func (cr *CmdRec) AllowRootCmdsWhileInMode() bool {
-	return true
 }
 
 func (cr *CmdRec) cleanup() {

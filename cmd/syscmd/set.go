@@ -24,6 +24,7 @@ const (
 	// Subcommand names for '$set'
 	CmdEnvName          = "env"
 	CmdVarName          = "var"
+	CmdMultiVarName     = "multi-vars"
 	CmdURLName          = "url"
 	CmdQueryName        = "query"
 	CmdHeaderName       = "header"
@@ -39,6 +40,10 @@ type CmdEnv struct {
 }
 
 type CmdVar struct {
+	*cmd.BaseCmd
+}
+
+type CmdMultiVar struct {
 	*cmd.BaseCmd
 }
 
@@ -115,19 +120,6 @@ func (u *CmdURL) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	return cmdCtx.Ctx, errors.New("no request to draft")
 }
 
-func (cmh *CmdMultiHeaders) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
-	ctx := cmdCtx.Ctx
-	handler := cmh.GetCmdHandler()
-
-	if handler.GetCurrentModeCmd() != cmh {
-		cmh.activateMultiHeaderMode()
-		return ctx, nil
-	} else {
-		//TODO: Implement context logic here to pickup request data.
-		return ctx, nil
-	}
-}
-
 func (cmh *CmdQuery) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.RawTokens, cmdCtx.Ctx
 	if len(tokens) < 2 {
@@ -147,11 +139,6 @@ func (cmh *CmdMultiHeaders) setHeader(key, val string) error {
 	}
 	cmh.req.Header.Set(key, val)
 	return nil
-}
-
-func (cmh *CmdMultiHeaders) activateMultiHeaderMode() {
-	handler := cmh.GetCmdHandler() // here is says cmh.GetCmdHandler undefined
-	handler.PushCmdMode("$multi-headers", cmh, false)
 }
 
 func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
@@ -205,6 +192,10 @@ func (vc *CmdVar) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	fmt.Printf("'%s' now set to '%s'\n", name, val)
 
 	return ctx, nil
+}
+
+func (vc *CmdVar) GetModeName() string {
+	return "$set var 📦"
 }
 
 func (pc *CmdPrompt) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {

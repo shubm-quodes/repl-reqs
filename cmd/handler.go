@@ -38,6 +38,8 @@ type Cmd interface {
 
 	GetInModeCmds() SubCmd
 
+	GetModeName() string
+
 	GetTaskStatus() *TaskStatus
 
 	setHandler(CmdHandler)
@@ -49,6 +51,10 @@ type Cmd interface {
 	AddSubCmd(cmd Cmd) Cmd
 
 	AddInModeCmd(cmd Cmd) Cmd
+
+	AllowInModeWithoutArgs() bool
+
+	AllowRootCmdsWhileInMode() bool
 
 	WalkTillLastSubCmd(subCmdMap SubCmd, tokens [][]rune) (remainingTkns [][]rune, c Cmd)
 
@@ -218,13 +224,13 @@ func (h *ReplCmdHandler) GetAppCfg() *config.AppCfg {
 	return h.appCfg
 }
 
-func (h *ReplCmdHandler) PushCmdMode(modeName string, cmd Cmd, allowRootCmds bool) {
+func (h *ReplCmdHandler) PushCmdMode(cmd Cmd) {
 	m := new(CmdMode)
-	m.CmdName = modeName
+	m.CmdName = cmd.GetModeName()
 	m.Cmd = cmd
-	m.AllowRootCmdsWhileInMode = allowRootCmds
+	m.AllowRootCmdsWhileInMode = cmd.AllowRootCmdsWhileInMode()
 	h.modes = append(h.modes, m)
-	h.SetPrompt(modeName, " ")
+	h.SetPrompt(cmd.GetModeName(), " ")
 }
 
 func (h *ReplCmdHandler) SetCurrentCmdMode(mode *CmdMode) {
@@ -252,7 +258,10 @@ func (h *ReplCmdHandler) IsCmdModeActive() bool {
 
 func (h *ReplCmdHandler) SuggestInModeRootCmds(partial string) ([][]rune, int) {
 	currModeCmd := h.GetCurrentModeCmd()
-	return h.suggestCmdsFromMap(currModeCmd.GetInModeCmds(), partial)
+	if currModeCmd.GetInModeCmds() != nil {
+		return h.suggestCmdsFromMap(currModeCmd.GetInModeCmds(), partial)
+	}
+	return nil, 0
 }
 
 func (h *ReplCmdHandler) SuggestInModeCmds(tokens [][]rune) ([][]rune, int) {
@@ -397,7 +406,10 @@ func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, tokens []string) (Cmd, []st
 	subCmds := rootCmd.GetSubCmds()
 
 	if h.GetCurrentModeCmd() != nil {
-		subCmds = rootCmd.GetInModeCmds()
+		mergeSubCmds := make(SubCmd, len(subCmds)+len(rootCmd.GetInModeCmds()))
+		util.CopyMap(mergeSubCmds, subCmds)
+		util.CopyMap(mergeSubCmds, rootCmd.GetInModeCmds())
+		subCmds = mergeSubCmds
 	}
 
 	remainingTkns, finalCmd := Walk(
@@ -418,6 +430,11 @@ func (h *ReplCmdHandler) executeCommand(
 ) (context.Context, error) {
 
 	finalCmd, args := h.ResolveCommand(rootCmd, remainingTokens)
+
+	if len(args) == 0 && finalCmd.AllowInModeWithoutArgs() {
+		h.PushCmdMode(finalCmd)
+		return ctx, nil
+	}
 
 	cmdCtx := newCmdCtx(ctx, args)
 	cmdCtx.ExpandedTokens = args
@@ -558,7 +575,8 @@ func (h *ReplCmdHandler) handleSuccessTaskStatus(task *TaskStatus) {
 	h.resetTaskState()
 	const lineClear = "                                                                                " // 80 spaces
 
-	fmt.Printf("\r%s\r✅ Task completed\n %s\n", lineClear, task.output)
+	duration := FormatDuration(time.Since(task.createdAt))
+	fmt.Printf("\r%s\r✅ Task completed (in: %s)\n %s\n", lineClear, duration, task.output)
 	h.RefreshPrompt()
 }
 
@@ -884,6 +902,10 @@ func (h *ReplCmdHandler) repl() {
 	}
 }
 
+func (h *ReplCmdHandler) Inject(c Cmd) {
+	c.setHandler(h)
+}
+
 func (h *ReplCmdHandler) injectIntoCmds(reg map[string]Cmd) {
 	for _, cmd := range reg {
 		cmd.setHandler(h)
@@ -977,4 +999,16 @@ func FormatPrompt(promptTxt, mascot string) string {
 
 	env := config.GetEnvManager().GetActiveEnvName()
 	return fmt.Sprintf("%s (%s) %s>", promptTxt, env, mascot)
+}
+
+func FormatDuration(d time.Duration) string {
+	if d < time.Minute {
+		ms := float64(d) / float64(time.Millisecond)
+		return fmt.Sprintf("%.2fms", ms)
+	}
+
+	minutes := int(d.Minutes())
+	seconds := int(d.Seconds()) % 60
+
+	return fmt.Sprintf("%dm %ds", minutes, seconds)
 }
