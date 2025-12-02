@@ -29,6 +29,7 @@ type RawCfg struct {
 
 // TODO: check and un-export fields
 type AppCfg struct {
+	appVersion      string
 	prompt          string
 	mascot          string
 	dirPath         string
@@ -97,6 +98,10 @@ func (ac *AppCfg) GetPrompt() string {
 
 func (ac *AppCfg) GetPromptMascot() string {
 	return ac.mascot
+}
+
+func (ac *AppCfg) SetVersion(version string) {
+	ac.appVersion = version
 }
 
 func (ac *AppCfg) TruncatePrompt() bool {

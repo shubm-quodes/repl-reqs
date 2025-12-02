@@ -931,8 +931,10 @@ func (h *ReplCmdHandler) activateListeners() {
 	}
 }
 
-func (h *ReplCmdHandler) Bootstrap() {
-	h.registerNativeCmds()
+func (h *ReplCmdHandler) Bootstrap(omitSysCmds bool) {
+	if !omitSysCmds {
+		h.registerNativeCmds()
+	}
 	h.injectIntoReg()
 	h.activateListeners()
 	h.loadSequences()

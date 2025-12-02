@@ -9,16 +9,31 @@ import (
 	"github.com/shubm-quodes/repl-reqs/config"
 )
 
+// -ldflags
+var (
+	// Default value for local runs
+	version            string = "0.0.0"
+	buildDate          string = "N/A"
+	omitSystemCommands string = "false"
+)
+
 func main() {
 	flags := config.InitializeFlags()
 	flags.Process()
 
-	cfg := config.Initialize(flags)
+	if flags.ShowVersion {
+		fmt.Printf("repl-reqs: v%s %s\n", version, buildDate)
+		os.Exit(0)
+	}
+
+	cfg := config.Initialize(flags, version)
 	reg := cmd.NewCmdRegistry()
 
-	syscmd.RegisterCmds(reg)
+	if omitSystemCommands == "false" {
+		syscmd.RegisterCmds(reg)
+	}
 
-	if cmdHandler, err := cmd.NewCmdHandler(cfg, config.GetShellCfg(cfg), reg); err != nil {
+	if cmdHandler, err := cmd.NewCmdHandler(cfg, config.NewShellCfg(cfg), reg); err != nil {
 		fmt.Println("failed to initialize command handler", err)
 		os.Exit(1)
 	} else {
@@ -26,6 +41,6 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		cmdHandler.Bootstrap()
+		cmdHandler.Bootstrap(omitSystemCommands == "true")
 	}
 }

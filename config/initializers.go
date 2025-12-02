@@ -13,12 +13,13 @@ import (
 )
 
 // Loads and initializes configuration parameters based on user supplied flags.
-func Initialize(flags *FlagVal) *AppCfg {
+func Initialize(flags *FlagVal, version string) *AppCfg {
 	appCfg = NewAppCfg()
 	appCfg.dirPath = flags.configPath
 	appCfg.file = path.Join(flags.configPath, "config.json")
 	appCfg.HistoryFile = path.Join(flags.configPath, "history")
 	appCfg.vimMode = flags.enableVimMode
+	appCfg.appVersion = version
 	appCfg.Load()
 	return appCfg
 }
@@ -38,7 +39,7 @@ func getReplEditor() string {
 	return envEditor
 }
 
-func GetShellCfg(cfg *AppCfg) *readline.Config {
+func NewShellCfg(cfg *AppCfg) *readline.Config {
 	return &readline.Config{
 		Prompt:            cfg.prompt,
 		HistoryFile:       cfg.HistoryFile,
