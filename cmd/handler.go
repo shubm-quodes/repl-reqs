@@ -423,6 +423,10 @@ func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, tokens []string) (Cmd, []st
 	return finalCmd, args
 }
 
+func (h *ReplCmdHandler) isCmdEligibleForMode(cmd Cmd, args []string) bool {
+	return len(args) == 0 && cmd.AllowInModeWithoutArgs() && h.GetCurrentModeCmd() != cmd
+}
+
 func (h *ReplCmdHandler) executeCommand(
 	ctx context.Context,
 	rootCmd Cmd,
@@ -431,7 +435,7 @@ func (h *ReplCmdHandler) executeCommand(
 
 	finalCmd, args := h.ResolveCommand(rootCmd, remainingTokens)
 
-	if len(args) == 0 && finalCmd.AllowInModeWithoutArgs() {
+	if h.isCmdEligibleForMode(finalCmd, args) {
 		h.PushCmdMode(finalCmd)
 		return ctx, nil
 	}

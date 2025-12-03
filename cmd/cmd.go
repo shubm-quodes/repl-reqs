@@ -283,12 +283,7 @@ func (c *BaseCmd) getSuggestions(
 	return lastSubCmd.filterSuggestions(search, offset), offset
 }
 
-// Just a default Execute method if no args or an invalid sub cmd gets provided
 func (c *BaseCmd) Execute(cmdCtx *CmdCtx) (context.Context, error) {
-	hdlr := c.GetCmdHandler()
-	if hdlr.GetCurrentModeCmd() != c {
-		hdlr.PushCmdMode(c)
-	}
 	return cmdCtx.Ctx, nil
 }
 
