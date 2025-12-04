@@ -7,7 +7,6 @@ import (
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
 	"github.com/shubm-quodes/repl-reqs/network"
-	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 const (
@@ -34,26 +33,19 @@ func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	if len(tokens) == 0 {
 		rd = er.Mgr.PeakRequestDraft(cmdCtx.ID())
 	} else {
-		hdlr := er.GetCmdHandler()
-		c, exists := hdlr.GetCmdRegistry().GetCmdByName(tokens[0])
-		if !exists {
-			return ctx, fmt.Errorf("invalid request command '%s'", strings.Join(tokens, " "))
+		c, remainingTokens := er.GetCmdHandler().ResolveCommandFromRoot(tokens)
+		if c == nil || len(remainingTokens) > 0 {
+			return ctx, fmt.Errorf("incomplete/invalid request cmd '%s'", strings.Join(tokens, " "))
 		}
 
-		remainingTokens, c := cmd.Walk(c, c.GetSubCmds(), util.StrArrToRune(tokens[1:]))
-		if len(remainingTokens) > 0 {
-			return ctx, fmt.Errorf("incomplete/invalid request command '%s'", strings.Join(tokens, " "))
-		}
-
-		req, ok := c.(*ReqCmd)
-		if !ok {
-			return ctx, fmt.Errorf("not a request command")
-		}
-
-		rd = req.RequestDraft
-		if rd == nil {
-			rd = network.NewRequestDraft()
-			req.RequestDraft = rd
+		if req, ok := c.(*ReqCmd); !ok {
+			return ctx, fmt.Errorf("'%s' is not a request cmd", strings.Join(tokens, " "))
+		} else {
+			rd = req.RequestDraft
+			if rd == nil {
+				rd = network.NewRequestDraft()
+				req.RequestDraft = rd
+			}
 		}
 	}
 

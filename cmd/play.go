@@ -29,7 +29,7 @@ type CmdPlay struct {
 func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 	hdlr := pl.GetCmdHandler()
 	taskUpdate := hdlr.GetUpdateChan()
-	taskStatus := pl.GetTaskStatus()
+	taskStatus := cmdCtx.TaskStatus
 	tokens := cmdCtx.ExpandedTokens
 
 	if len(tokens) == 0 {

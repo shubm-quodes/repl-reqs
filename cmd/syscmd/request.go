@@ -547,7 +547,7 @@ func (rc *ReqCmd) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 	tokens := cmdCtx.ExpandedTokens
 	hdlr := rc.GetCmdHandler()
 	taskUpdate := hdlr.GetUpdateChan()
-	taskStatus := rc.GetTaskStatus()
+	taskStatus := cmdCtx.TaskStatus
 
 	cmdParams, err := rc.getCmdParams(tokens)
 	if err != nil {
@@ -563,11 +563,10 @@ func (rc *ReqCmd) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 		return
 	}
 
-	rc.MakeRequest(req)
+	rc.MakeRequest(req, taskStatus)
 }
 
-func (rc *ReqCmd) MakeRequest(req *http.Request) {
-	taskStatus := rc.GetTaskStatus()
+func (rc *ReqCmd) MakeRequest(req *http.Request, taskStatus *cmd.TaskStatus) {
 	taskUpdate := rc.GetCmdHandler().GetUpdateChan()
 	_, netUpdate, err := rc.Mgr.MakeRequest(req)
 

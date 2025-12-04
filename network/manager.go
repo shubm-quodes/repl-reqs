@@ -29,7 +29,7 @@ func NewRequestManager(
 	commonHeaders http.Header,
 ) *RequestManager {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{}
 	}
 	return &RequestManager{
 		tracker:       tracker,

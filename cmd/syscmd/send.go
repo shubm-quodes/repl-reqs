@@ -15,7 +15,7 @@ type CmdSend struct {
 }
 
 func (s *CmdSend) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
-	t := s.GetTaskStatus()
+	t := cmdCtx.TaskStatus
 	draft := s.Mgr.PeakRequestDraft(cmdCtx.ID())
 	updateChan := s.GetCmdHandler().GetUpdateChan()
 
@@ -32,7 +32,7 @@ func (s *CmdSend) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 		t.SetError(err)
 		updateChan <- (*t)
 	} else {
-		s.MakeRequest(req)
+		s.MakeRequest(req, t)
 	}
 }
 

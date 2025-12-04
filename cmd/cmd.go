@@ -16,6 +16,7 @@ type CmdCtx struct {
 	Ctx            context.Context
 	RawTokens      []string
 	ExpandedTokens []string
+	*TaskStatus
 }
 
 type CmdHandler interface {
@@ -58,6 +59,10 @@ type CmdHandler interface {
 	ListSequences()
 
 	RegisterSequence(sequenceName string) error
+
+	ResolveCommand(c Cmd, tokens []string) (Cmd, []string) 
+
+	ResolveCommandFromRoot(tokens []string) (Cmd, []string) 
 
 	SaveSequenceStep(sequenceName string, step *Step) error
 
@@ -138,14 +143,6 @@ func (b *BaseCmd) GetSubCmdList() []string {
 
 func (b *BaseCmd) GetModeName() string {
 	return b.Name()
-}
-
-func (b *BaseCmd) GetTaskStatus() *TaskStatus {
-	return b.taskStatus
-}
-
-func (b *BaseCmd) SetTaskStatus(t *TaskStatus) {
-	b.taskStatus = t
 }
 
 func (b *BaseCmd) SetParent(parent Cmd) {

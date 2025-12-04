@@ -40,13 +40,9 @@ type Cmd interface {
 
 	GetModeName() string
 
-	GetTaskStatus() *TaskStatus
-
 	setHandler(CmdHandler)
 
 	SetParent(Cmd)
-
-	SetTaskStatus(*TaskStatus)
 
 	AddSubCmd(cmd Cmd) Cmd
 
@@ -153,7 +149,7 @@ func NewCmdHandler(
 	}
 }
 
-func newCmdCtx(ctx context.Context, tokens []string) *CmdCtx {
+func NewCmdCtx(ctx context.Context, tokens []string) *CmdCtx {
 	return &CmdCtx{
 		Ctx:       ctx,
 		RawTokens: tokens,
@@ -402,6 +398,15 @@ func (h *ReplCmdHandler) GetRootCmd(tokens []string) (Cmd, []string, error) {
 	return nil, nil, fmt.Errorf("invalid command '%s'", tokens[0])
 }
 
+func (h *ReplCmdHandler) ResolveCommandFromRoot(tokens []string) (Cmd, []string) {
+	if len(tokens) == 0 {
+		return nil, tokens
+	}
+
+	c := h.GetCmdByName(tokens[0])
+	return h.ResolveCommand(c, tokens[1:])
+}
+
 func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, tokens []string) (Cmd, []string) {
 	subCmds := rootCmd.GetSubCmds()
 
@@ -440,7 +445,7 @@ func (h *ReplCmdHandler) executeCommand(
 		return ctx, nil
 	}
 
-	cmdCtx := newCmdCtx(ctx, args)
+	cmdCtx := NewCmdCtx(ctx, args)
 	cmdCtx.ExpandedTokens = args
 
 	if asyncCmd, ok := finalCmd.(AsyncCmd); ok {
@@ -486,7 +491,7 @@ func (h *ReplCmdHandler) isSeqStepCtx(ctx context.Context) bool {
 func (h *ReplCmdHandler) HandleAsyncSeqStep(cmd AsyncCmd, cmdCtx *CmdCtx) {
 	ctx := cmdCtx.Ctx
 	if step, ok := ctx.Value(StepKey).(*Step); ok {
-		step.TaskStatus = cmd.GetTaskStatus()
+		step.TaskStatus = cmdCtx.TaskStatus
 	}
 
 	cmd.ExecuteAsync(cmdCtx)
@@ -501,10 +506,9 @@ func (h *ReplCmdHandler) HandleAsyncCmd(
 	taskCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	cmd.SetTaskStatus(task)
-
-	cmdCtx := newCmdCtx(taskCtx, tokens)
+	cmdCtx := NewCmdCtx(taskCtx, tokens)
 	cmdCtx.ExpandedTokens = tokens
+	cmdCtx.TaskStatus = task
 
 	h.rl.SaveHistory(cmd.GetFullyQualifiedName() + " " + strings.Join(tokens, " "))
 	if h.isSeqStepCtx(ctx) {

@@ -10,7 +10,7 @@ import (
 
 const (
 	VarPattern    = `{{(.*?)}}`
-	defaultPrompt = "repl"
+	defaultPrompt = "repl-reqs"
 	defaultMascot = "😼"
 )
 
