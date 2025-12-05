@@ -8,12 +8,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 type Step struct {
 	Name string   `json:"name"`
 	Cmd  []string `json:"cmd"`
-	*TaskStatus
+	Task TaskUpdater
 }
 
 var (
@@ -97,7 +99,7 @@ func (s *Step) expandStepBased(content string, seq Sequence) (string, error) {
 
 	targetStep := seq[stepIndex]
 
-	if targetStep.TaskStatus == nil || targetStep.TaskStatus.result == nil {
+	if targetStep.Task == nil || targetStep.Task.GetResult() == nil {
 		return "", fmt.Errorf("step %d has no result available", stepNum)
 	}
 
@@ -105,11 +107,11 @@ func (s *Step) expandStepBased(content string, seq Sequence) (string, error) {
 
 	// Check if there's a filter condition (contains '=')
 	if strings.Contains(path, "=") {
-		return s.expandWithFilter(targetStep.TaskStatus.result.(*http.Response), path)
+		return s.expandWithFilter(targetStep.Task.GetResult().(*http.Response), path)
 	}
 
 	// Simple value extraction
-	return s.extractValue(targetStep.TaskStatus.result.(*http.Response), path)
+	return s.extractValue(targetStep.Task.GetResult().(*http.Response), path)
 }
 
 func (s *Step) expandWithFilter(resp *http.Response, path string) (string, error) {
@@ -143,7 +145,7 @@ func (s *Step) expandWithFilter(resp *http.Response, path string) (string, error
 	// Navigate to the array
 	current := data
 	for i := 0; i < len(pathParts)-1; i++ {
-		current, err = navigateToKey(current, pathParts[i])
+		current, err = util.NavigateToKey(current, pathParts[i])
 		if err != nil {
 			return "", err
 		}
@@ -171,7 +173,7 @@ func (s *Step) extractValue(resp *http.Response, path string) (string, error) {
 	current := data
 
 	for _, part := range pathParts {
-		current, err = navigateToKey(current, part)
+		current, err = util.NavigateToKey(current, part)
 		if err != nil {
 			return "", err
 		}
@@ -200,50 +202,6 @@ func decodeResponse(resp *http.Response) (any, error) {
 	}
 
 	return data, nil
-}
-
-func navigateToKey(data any, key string) (interface{}, error) {
-	switch v := data.(type) {
-	case map[string]any:
-		if val, ok := v[key]; ok {
-			return val, nil
-		}
-		return nil, fmt.Errorf("key '%s' not found in object", key)
-
-	case []any:
-		if idx, err := strconv.Atoi(key); err == nil {
-			if idx < 0 || idx >= len(v) {
-				return nil, fmt.Errorf("array index %d out of range (length: %d)", idx, len(v))
-			}
-			return v[idx], nil
-		}
-
-		// Check if key is wildcard "*"
-		if key == "*" {
-			return v, nil
-		}
-
-		// If key is not an index or wildcard, try to collect the key from all array elements
-		// This handles cases like: array is at current level, but we want a property from each element
-		var results []any
-		for _, item := range v {
-			if obj, ok := item.(map[string]any); ok {
-				if val, exists := obj[key]; exists {
-					results = append(results, val)
-				}
-			}
-		}
-
-		if len(results) == 0 {
-			return nil, fmt.Errorf("key '%s' not found in any array element", key)
-		}
-
-		// If all results are the same type and simple values, return them
-		return results, nil
-
-	default:
-		return nil, fmt.Errorf("cannot navigate from type %T with key '%s'", data, key)
-	}
 }
 
 func formatResult(data any) string {

@@ -103,7 +103,7 @@ type ReplCmdHandler struct {
 	sequenceRegistry      map[string]Sequence
 	defaultCtx            context.Context
 	taskUpdates           chan TaskStatus
-	tasks                 map[string]*TaskStatus
+	tasks                 map[string]*Task
 	spinner               *spinner.Spinner
 	currFgTaskId          string
 	lastBgTaskId          string
@@ -124,7 +124,7 @@ func NewCmdHandler(
 		taskUpdates:  make(chan TaskStatus, 1),
 		fgTaskIdChan: make(chan string),
 		bgTaskIdChan: make(chan string),
-		tasks:        make(map[string]*TaskStatus),
+		tasks:        make(map[string]*Task),
 		cmdRegistry:  reg,
 		spinner:      spinner.New(spinner.CharSets[14], 100*time.Millisecond),
 	}
@@ -149,27 +149,24 @@ func NewCmdHandler(
 	}
 }
 
-func NewCmdCtx(ctx context.Context, tokens []string) *CmdCtx {
+func NewCmdCtx(ctx context.Context, tokens []string, taskUpdater TaskUpdater) *CmdCtx {
 	return &CmdCtx{
 		Ctx:       ctx,
 		RawTokens: tokens,
+		Task:      taskUpdater,
 	}
 }
 
-func (h *ReplCmdHandler) NewTaskStatus(message, cmd string) *TaskStatus {
+func (h *ReplCmdHandler) CreateTask(message, cmd string) *Task {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	taskId := fmt.Sprintf("#%d", len(h.tasks)+1)
-	taskStatus := &TaskStatus{
-		id:        taskId,
-		message:   message,
-		cmd:       cmd,
-		createdAt: time.Now(),
-	}
+	id := fmt.Sprintf("#%d", len(h.tasks)+1)
+	task := NewTask(id, cmd, h.taskUpdates)
+	task.status.Message = message
 
-	h.tasks[taskId] = taskStatus
-	return taskStatus
+	h.tasks[id] = task
+	return task
 }
 
 func (h *ReplCmdHandler) GetCmdRegistry() *CmdRegistry {
@@ -210,10 +207,6 @@ func (h *ReplCmdHandler) GetCurrModesInModeCmdByName(name string) Cmd {
 	} else {
 		return inModeCmds[name]
 	}
-}
-
-func (h *ReplCmdHandler) GetUpdateChan() chan<- TaskStatus {
-	return h.taskUpdates
 }
 
 func (h *ReplCmdHandler) GetAppCfg() *config.AppCfg {
@@ -445,7 +438,7 @@ func (h *ReplCmdHandler) executeCommand(
 		return ctx, nil
 	}
 
-	cmdCtx := NewCmdCtx(ctx, args)
+	cmdCtx := NewCmdCtx(ctx, args, nil)
 	cmdCtx.ExpandedTokens = args
 
 	if asyncCmd, ok := finalCmd.(AsyncCmd); ok {
@@ -491,7 +484,7 @@ func (h *ReplCmdHandler) isSeqStepCtx(ctx context.Context) bool {
 func (h *ReplCmdHandler) HandleAsyncSeqStep(cmd AsyncCmd, cmdCtx *CmdCtx) {
 	ctx := cmdCtx.Ctx
 	if step, ok := ctx.Value(StepKey).(*Step); ok {
-		step.TaskStatus = cmdCtx.TaskStatus
+		step.Task = cmdCtx.Task
 	}
 
 	cmd.ExecuteAsync(cmdCtx)
@@ -502,22 +495,20 @@ func (h *ReplCmdHandler) HandleAsyncCmd(
 	cmd AsyncCmd,
 	tokens []string,
 ) (context.Context, error) {
-	task := h.NewTaskStatus(TaskStatusInitiated+" 🕙", cmd.GetFullyQualifiedName())
+	task := h.CreateTask(TaskStatusInitiated+" 🕙", cmd.GetFullyQualifiedName())
 	taskCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	cmdCtx := NewCmdCtx(taskCtx, tokens)
+	cmdCtx := NewCmdCtx(taskCtx, tokens, task)
 	cmdCtx.ExpandedTokens = tokens
-	cmdCtx.TaskStatus = task
 
 	h.rl.SaveHistory(cmd.GetFullyQualifiedName() + " " + strings.Join(tokens, " "))
 	if h.isSeqStepCtx(ctx) {
 		h.HandleAsyncSeqStep(cmd, cmdCtx)
 	} else {
-		h.currFgTaskId = task.id
+		h.currFgTaskId = task.status.ID
 		h.spinner.Start()
-		h.spinner.Suffix = task.message
-		h.taskUpdates <- *task
+		h.spinner.Suffix = task.status.Message
 		go func() {
 			defer h.spinner.Stop()
 
@@ -537,40 +528,37 @@ func (h *ReplCmdHandler) handleUpdateChanClose() {
 	}
 }
 
-func (h *ReplCmdHandler) handleTaskUpdate(statusUpdate TaskStatus) {
+func (h *ReplCmdHandler) handleTaskUpdate(statusUpdate *TaskStatus) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	task := h.findOrCreateTask(statusUpdate.id)
-	h.updateTaskStatus(task, statusUpdate)
-	h.handleTaskCompletionOrError(&statusUpdate)
+	task := h.findOrCreateTask(statusUpdate.ID)
+	h.updateTaskStatus(&task.status, statusUpdate)
+	h.handleTaskCompletionOrError(statusUpdate)
 
 	if h.currFgTaskId != "" {
-		h.updateSpinnerMsg(task)
+		h.updateSpinnerMsg(&task.status)
 	}
 }
 
-func (h *ReplCmdHandler) findOrCreateTask(id string) *TaskStatus {
+func (h *ReplCmdHandler) findOrCreateTask(id string) *Task {
 	task, exists := h.tasks[id]
 	if !exists {
-		task = &TaskStatus{
-			id:        id,
-			createdAt: time.Now(),
-		}
+		task = NewTask(id, "", nil)
 		h.tasks[id] = task
 	}
 	return task
 }
 
-func (h *ReplCmdHandler) updateTaskStatus(task *TaskStatus, update TaskStatus) {
-	task.message = update.message
-	task.error = update.error
-	task.done = update.done
-	task.result = update.result
-	task.output = update.output
+func (h *ReplCmdHandler) updateTaskStatus(task *TaskStatus, update *TaskStatus) {
+	task.Message = update.Message
+	task.Error = update.Error
+	task.Done = update.Done
+	task.Result = update.Result
+	task.Output = update.Output
 
-	if !task.done && task.error == nil {
-		h.spinner.Suffix = task.message
+	if !task.Done && task.Error == nil {
+		h.spinner.Suffix = task.Message
 	}
 }
 
@@ -579,12 +567,12 @@ func (h *ReplCmdHandler) resetTaskState() {
 	h.lastBgTaskId = ""
 }
 
-func (h *ReplCmdHandler) handleSuccessTaskStatus(task *TaskStatus) {
+func (h *ReplCmdHandler) handleSuccessTaskStatus(status *TaskStatus) {
 	h.resetTaskState()
 	const lineClear = "                                                                                " // 80 spaces
 
-	duration := FormatDuration(time.Since(task.createdAt))
-	fmt.Printf("\r%s\r✅ Task completed (in: %s)\n %s\n", lineClear, duration, task.output)
+	duration := FormatDuration(time.Since(status.CreatedAt))
+	fmt.Printf("\r%s\r✅ Task completed (in: %s)\n %s\n", lineClear, duration, status.Output)
 	h.RefreshPrompt()
 }
 
@@ -593,25 +581,25 @@ func (h *ReplCmdHandler) handleFailedTaskStatus(task *TaskStatus) {
 
 	fmt.Println("❌ Task failed")
 	fmt.Println()
-	msg := task.error.Error()
+	msg := task.Error.Error()
 
-	if task.output != "" {
-		msg = task.output
+	if task.Output != "" {
+		msg = task.Output
 	}
 
 	color.HiRed(msg)
 }
 
-func (h *ReplCmdHandler) handleTaskCompletionOrError(task *TaskStatus) {
-	if !task.done && task.error == nil {
+func (h *ReplCmdHandler) handleTaskCompletionOrError(status *TaskStatus) {
+	if !status.Done && status.Error == nil {
 		return
 	}
 
-	if h.currFgTaskId == task.id {
-		if task.error == nil {
-			h.handleSuccessTaskStatus(task)
+	if h.currFgTaskId == status.ID {
+		if status.Error == nil {
+			h.handleSuccessTaskStatus(status)
 		} else {
-			h.handleFailedTaskStatus(task)
+			h.handleFailedTaskStatus(status)
 		}
 		h.rl.Refresh()
 	}
@@ -625,7 +613,7 @@ func (h *ReplCmdHandler) listenForTaskUpdates() {
 				h.handleUpdateChanClose()
 				return
 			}
-			h.handleTaskUpdate(statusUpdate)
+			h.handleTaskUpdate(&statusUpdate)
 
 		case fgTaskId := <-h.fgTaskIdChan:
 			h.bringTaskToFg(fgTaskId)
@@ -667,30 +655,30 @@ func (h *ReplCmdHandler) ListTasks() {
 
 	fmt.Println("🕙 Tasks ~")
 	for _, taskId := range taskIds {
-		status := h.tasks[taskId]
-		h.PrintFormattedTaskStatus(status)
+		task := h.tasks[taskId]
+		h.PrintFormattedTaskStatus(&task.status)
 		fmt.Print("\n---------------------------------------------------\n")
 	}
 }
 
 func (h *ReplCmdHandler) PrintFormattedTaskStatus(status *TaskStatus) {
 	formatStr := "\n%s %s ~ %s"
-	if status.error != nil {
+	if status.Error != nil {
 		formatStr = formatStr + "❌"
-	} else if status.done {
+	} else if status.Done {
 		formatStr = formatStr + "✅"
 	} else {
 		formatStr = formatStr + "In progres...🏃"
 	}
 
-	fmt.Printf(formatStr+"\n", status.id, status.cmd, status.output)
+	fmt.Printf(formatStr+"\n", status.ID, status.Cmd, status.Output)
 }
 
 func (h *ReplCmdHandler) updateSpinnerMsg(ts *TaskStatus) {
-	if ts.error != nil {
-		h.spinner.Suffix = " " + ts.error.Error()
+	if ts.Error != nil {
+		h.spinner.Suffix = " " + ts.Error.Error()
 	} else {
-		h.spinner.Suffix = " " + ts.message
+		h.spinner.Suffix = " " + ts.Message
 	}
 }
 
@@ -718,7 +706,7 @@ func (h *ReplCmdHandler) bringTaskToFg(taskId string) {
 	h.currFgTaskId = taskId
 
 	if task, exists := h.tasks[taskId]; exists {
-		h.updateSpinnerMsg(task)
+		h.updateSpinnerMsg(&task.status)
 		h.currFgTaskId = taskId
 		fmt.Println("\nlast active task is now in foreground")
 		h.spinner.Start()
@@ -1012,13 +1000,18 @@ func FormatPrompt(promptTxt, mascot string) string {
 }
 
 func FormatDuration(d time.Duration) string {
-	if d < time.Minute {
+	if d < time.Second {
 		ms := float64(d) / float64(time.Millisecond)
 		return fmt.Sprintf("%.2fms", ms)
 	}
 
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
+	if d < time.Minute {
+		seconds := d.Seconds()
+		return fmt.Sprintf("%.2fs", seconds)
+	}
 
+	minutes := int(d.Minutes())
+
+	seconds := int(d.Seconds()) % 60
 	return fmt.Sprintf("%dm %ds", minutes, seconds)
 }

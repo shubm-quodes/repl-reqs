@@ -28,13 +28,11 @@ type CmdPlay struct {
 
 func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 	hdlr := pl.GetCmdHandler()
-	taskUpdate := hdlr.GetUpdateChan()
-	taskStatus := cmdCtx.TaskStatus
+	task := cmdCtx.Task
 	tokens := cmdCtx.ExpandedTokens
 
 	if len(tokens) == 0 {
-		taskStatus.SetError(errors.New("please specify sequence name"))
-		taskUpdate <- (*taskStatus)
+		task.Fail(errors.New("please specify sequence name"))
 		return
 	}
 
@@ -42,8 +40,7 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 
 	seq, err := hdlr.GetSequence(sequenceName)
 	if err != nil {
-		taskStatus.SetError(err)
-		taskUpdate <- (*taskStatus)
+		task.Fail(err)
 		return
 	}
 
@@ -72,7 +69,7 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 				break
 			}
 
-			taskStatus.SetMessage(
+			task.UpdateMessage(
 				fmt.Sprintf(
 					"step %d: %s",
 					idx+1,
@@ -80,7 +77,6 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 				),
 			)
 
-			taskUpdate <- (*taskStatus)
 			stepCtx, execErr = hdlr.HandleCmd(stepCtx, expandedCmd)
 			if execErr != nil {
 				break
@@ -100,14 +96,16 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 
 	if execErr != nil {
 		fmt.Fprint(os.Stderr, buf.String())
-		taskStatus.SetError(fmt.Errorf("sequence '%s' failed at step: %w", sequenceName, execErr))
-		taskUpdate <- (*taskStatus)
+		task.Fail(
+			fmt.Errorf("sequence '%s' failed at step: %w", sequenceName, execErr),
+		)
 		return
 	}
 
-	taskStatus.SetOutput(fmt.Sprintf("sequence '%s' successfully completed\n", sequenceName))
-	taskStatus.SetDone(true)
-	taskUpdate <- (*taskStatus)
+	task.CompleteWithMessage(
+		fmt.Sprintf("sequence '%s' successfully completed\n", sequenceName),
+		nil,
+	)
 }
 
 func (pl *CmdPlay) cloneSequence(originalSeq []*Step) []*Step {

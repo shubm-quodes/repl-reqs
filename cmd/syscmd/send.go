@@ -15,22 +15,18 @@ type CmdSend struct {
 }
 
 func (s *CmdSend) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
-	t := cmdCtx.TaskStatus
+	t := cmdCtx.Task
 	draft := s.Mgr.PeakRequestDraft(cmdCtx.ID())
-	updateChan := s.GetCmdHandler().GetUpdateChan()
 
 	if draft == nil {
-		t.SetError(
+		t.Fail(
 			fmt.Errorf("no drafts, start drafting requests using %s command", CmdDraftReqName),
 		)
-    t.SetDone(true)
-		updateChan <- (*t)
-    return
+		return
 	}
 
 	if req, err := draft.Finalize(); err != nil {
-		t.SetError(err)
-		updateChan <- (*t)
+		t.Fail(err)
 	} else {
 		s.MakeRequest(req, t)
 	}

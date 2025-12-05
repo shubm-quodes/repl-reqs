@@ -16,7 +16,7 @@ type CmdCtx struct {
 	Ctx            context.Context
 	RawTokens      []string
 	ExpandedTokens []string
-	*TaskStatus
+	Task           TaskUpdater
 }
 
 type CmdHandler interface {
@@ -27,8 +27,6 @@ type CmdHandler interface {
 	GetSequence(name string) (Sequence, error)
 
 	GetAppCfg() *config.AppCfg
-
-	GetUpdateChan() chan<- TaskStatus
 
 	GetCmdRegistry() *CmdRegistry
 
@@ -60,9 +58,9 @@ type CmdHandler interface {
 
 	RegisterSequence(sequenceName string) error
 
-	ResolveCommand(c Cmd, tokens []string) (Cmd, []string) 
+	ResolveCommand(c Cmd, tokens []string) (Cmd, []string)
 
-	ResolveCommandFromRoot(tokens []string) (Cmd, []string) 
+	ResolveCommandFromRoot(tokens []string) (Cmd, []string)
 
 	SaveSequenceStep(sequenceName string, step *Step) error
 
@@ -80,7 +78,6 @@ type BaseCmd struct {
 	InModeCmds SubCmd
 	parent     Cmd
 	handler    CmdHandler
-	taskStatus *TaskStatus
 }
 
 type BaseNonModeCmd struct {

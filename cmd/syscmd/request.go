@@ -3,6 +3,7 @@ package syscmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -261,7 +262,6 @@ func (rc *ReqCmd) register(
 
 	if len(segments) == 1 {
 		rc.Name_ = rootCmd
-		cmdRegistry.RegisterCmd(rc)
 	}
 
 	if existingCmd, exists := cmdRegistry.GetCmdByName(rootCmd); exists {
@@ -311,6 +311,10 @@ func (rc *ReqCmd) constructBodyVldSchema(rawBody map[string]json.RawMessage) err
 		bodySchema map[string]json.RawMessage
 		err        error
 	)
+
+	if len(rawBody) == 0 {
+		return nil
+	}
 
 	if rawBodySchema, ok := rawBody["schema"]; !ok {
 		log.Debug(
@@ -545,46 +549,37 @@ func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
 
 func (rc *ReqCmd) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 	tokens := cmdCtx.ExpandedTokens
-	hdlr := rc.GetCmdHandler()
-	taskUpdate := hdlr.GetUpdateChan()
-	taskStatus := cmdCtx.TaskStatus
+	task := cmdCtx.Task
 
 	cmdParams, err := rc.getCmdParams(tokens)
 	if err != nil {
-		taskStatus.SetError(err)
-		taskUpdate <- (*taskStatus)
+		task.Fail(err)
 		return
 	}
 
 	req, err := rc.buildRequest(cmdParams)
 	if err != nil {
-		taskStatus.SetError(err)
-		taskUpdate <- (*taskStatus)
+		task.Fail(err)
 		return
 	}
 
-	rc.MakeRequest(req, taskStatus)
+	rc.MakeRequest(req, task)
 }
 
-func (rc *ReqCmd) MakeRequest(req *http.Request, taskStatus *cmd.TaskStatus) {
-	taskUpdate := rc.GetCmdHandler().GetUpdateChan()
+func (rc *ReqCmd) MakeRequest(req *http.Request, task cmd.TaskUpdater) {
 	_, netUpdate, err := rc.Mgr.MakeRequest(req)
 
 	if err != nil {
-		taskStatus.SetError(err)
-		taskUpdate <- (*taskStatus)
+		task.Fail(err)
 		return
 	}
 
 	result := <-netUpdate
 	if result.Err() == nil {
-		rc.handleSuccessfulResponse(taskStatus, result)
+		rc.handleSuccessfulResponse(task, result)
 	} else {
-		taskStatus.SetError(result.Err())
-		taskStatus.SetOutput(result.Err().Error())
+		task.Fail(result.Err())
 	}
-	taskStatus.SetDone(true)
-	taskUpdate <- (*taskStatus)
 }
 
 func (rc *ReqCmd) readAndUnmarshalResponse(resp *http.Response, target map[string]any) error {
@@ -606,18 +601,17 @@ func (rc *ReqCmd) readAndUnmarshalResponse(resp *http.Response, target map[strin
 	return nil
 }
 
-func (rc *ReqCmd) handleSuccessfulResponse(taskStatus *cmd.TaskStatus, result network.Update) {
+func (rc *ReqCmd) handleSuccessfulResponse(task cmd.TaskUpdater, result network.Update) {
 	respMap := make(map[string]any)
 
 	err := rc.readAndUnmarshalResponse(result.Resp(), respMap)
 	if err != nil {
-		taskStatus.SetError(err)
-		taskStatus.SetOutput(err.Error() + "\n\n" + result.Resp().Status)
+		task.Fail(errors.New(err.Error() + "\n\n" + result.Resp().Status))
 		return
 	}
 
-	taskStatus.SetResult(result.Resp())
-	taskStatus.SetOutput(getFromattedResp(respMap) + "\n" + result.Resp().Status)
+	task.AppendOutput(getFromattedResp(respMap) + "\n" + result.Resp().Status)
+	task.Complete(result.Resp())
 }
 
 func rgbToAnsiEscapeCode(r, g, b uint8) string {
