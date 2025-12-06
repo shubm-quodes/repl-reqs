@@ -50,7 +50,7 @@ func (sv *CmdFinalizeRec) Execute(cmdCtx *CmdCtx) (context.Context, error) {
 		return cmdCtx.Ctx, fmt.Errorf("failed to save sequence '%s'", seqName)
 	} else {
 		rec.isFinalized = true
-		fmt.Printf("sequence '%s' saved successfully! 👌🏼\n", seqName)
+		hdlr.printf("sequence '%s' saved successfully! 👌🏼\n", seqName)
 		hdlr.ExitCmdMode()
 		return cmdCtx.Ctx, nil
 	}

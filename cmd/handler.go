@@ -105,6 +105,7 @@ type ReplCmdHandler struct {
 	taskUpdates           chan TaskStatus
 	tasks                 map[string]*Task
 	spinner               *spinner.Spinner
+	tty                   *os.File
 	currFgTaskId          string
 	lastBgTaskId          string
 	fgTaskIdChan          chan string
@@ -425,6 +426,14 @@ func (h *ReplCmdHandler) isCmdEligibleForMode(cmd Cmd, args []string) bool {
 	return len(args) == 0 && cmd.AllowInModeWithoutArgs() && h.GetCurrentModeCmd() != cmd
 }
 
+func (h *ReplCmdHandler) HandleSyncCmdResult(cmdCtx *CmdCtx, err error) {
+	if err != nil {
+		h.Out(cmdCtx, err.Error())
+	} else if strings.Trim(cmdCtx.Task.GetOutput(), "") != "" {
+		h.Out(cmdCtx, cmdCtx.Task.GetOutput())
+	}
+}
+
 func (h *ReplCmdHandler) executeCommand(
 	ctx context.Context,
 	rootCmd Cmd,
@@ -438,14 +447,17 @@ func (h *ReplCmdHandler) executeCommand(
 		return ctx, nil
 	}
 
-	cmdCtx := NewCmdCtx(ctx, args, nil)
+	task := NewTask(DefaultTaskIdNonTrackingID, finalCmd.GetFullyQualifiedName(), nil)
+	cmdCtx := NewCmdCtx(ctx, args, task)
 	cmdCtx.ExpandedTokens = args
 
 	if asyncCmd, ok := finalCmd.(AsyncCmd); ok {
 		return h.HandleAsyncCmd(ctx, asyncCmd, args)
 	}
 
-	return finalCmd.Execute(cmdCtx)
+	ctx, err := finalCmd.Execute(cmdCtx)
+	h.HandleSyncCmdResult(cmdCtx, err)
+	return ctx, err
 }
 
 func (h *ReplCmdHandler) HandleCmd(
@@ -582,22 +594,22 @@ func (h *ReplCmdHandler) handleSuccessTaskStatus(status *TaskStatus) {
 	const lineClear = "                                                                                " // 80 spaces
 
 	duration := FormatDuration(time.Since(status.CreatedAt))
-	fmt.Printf("\r%s\r✅ Task completed (in: %s)\n %s\n", lineClear, duration, status.Output)
+	h.printf("\r%s\r✅ Task completed (in: %s)\n %s\n", lineClear, duration, status.Output)
 	h.RefreshPrompt()
 }
 
 func (h *ReplCmdHandler) handleFailedTaskStatus(task *TaskStatus) {
 	h.resetTaskState()
 
-	fmt.Println("❌ Task failed")
-	fmt.Println()
+	h.println("❌ Task failed")
 	msg := task.Error.Error()
 
 	if task.Output != "" {
 		msg = task.Output
 	}
 
-	color.HiRed(msg)
+	h.println(color.HiRedString(msg))
+	h.RefreshPrompt()
 }
 
 func (h *ReplCmdHandler) handleTaskCompletionOrError(status *TaskStatus) {
@@ -642,17 +654,17 @@ func (h *ReplCmdHandler) ListSequences() {
 
 	sort.Strings(names)
 
-	fmt.Print("Sequences -\n\n")
+	h.print("Sequences -\n\n")
 	for idx, n := range names {
-		fmt.Printf("%d.) %s\n", idx+1, n)
+		h.printf("%d.) %s\n", idx+1, n)
 	}
 
-	fmt.Println("\ntotal", len(names))
+	h.printf("\ntotal %d\n", len(names))
 }
 
 func (h *ReplCmdHandler) ListTasks() {
 	if len(h.tasks) == 0 {
-		fmt.Printf("nothing's running right now %s\n", "😴")
+		h.printf("nothing's running right now %s\n", "😴")
 		return
 	}
 
@@ -663,11 +675,11 @@ func (h *ReplCmdHandler) ListTasks() {
 
 	sort.Strings(taskIds)
 
-	fmt.Println("🕙 Tasks ~")
+	h.println("🕙 Tasks ~")
 	for _, taskId := range taskIds {
 		task := h.tasks[taskId]
 		h.PrintFormattedTaskStatus(&task.status)
-		fmt.Print("\n---------------------------------------------------\n")
+		h.print("\n---------------------------------------------------\n")
 	}
 }
 
@@ -681,7 +693,7 @@ func (h *ReplCmdHandler) PrintFormattedTaskStatus(status *TaskStatus) {
 		formatStr = formatStr + "In progres...🏃"
 	}
 
-	fmt.Printf(formatStr+"\n", status.ID, status.Cmd, status.Output)
+	h.printf(formatStr+"\n", status.ID, status.Cmd, status.Output)
 }
 
 func (h *ReplCmdHandler) updateSpinnerMsg(ts *TaskStatus) {
@@ -700,7 +712,7 @@ func (h *ReplCmdHandler) sendTaskToBg() {
 	if taskId != "" && h.spinner.Active() {
 		h.currFgTaskId = ""
 		h.spinner.Stop()
-		fmt.Printf("task '%s' sent to background\n", taskId)
+		h.printf("task '%s' sent to background\n", taskId)
 		h.rl.Refresh()
 	}
 }
@@ -718,15 +730,9 @@ func (h *ReplCmdHandler) bringTaskToFg(taskId string) {
 	if task, exists := h.tasks[taskId]; exists {
 		h.updateSpinnerMsg(&task.status)
 		h.currFgTaskId = taskId
-		fmt.Println("\nlast active task is now in foreground")
+		h.println("\nlast active task is now in foreground")
 		h.spinner.Start()
 		h.RefreshPrompt()
-	}
-}
-
-func (h *ReplCmdHandler) Handle(tokens []string) {
-	if _, err := h.HandleCmd(h.defaultCtx, tokens); err != nil {
-		fmt.Println(err.Error())
 	}
 }
 
@@ -832,19 +838,6 @@ func (h *ReplCmdHandler) GetSequence(name string) (Sequence, error) {
 	return seq, nil
 }
 
-func (h *ReplCmdHandler) PlaySequence(name string) error {
-	seq, exists := h.sequenceRegistry[name]
-	if !exists {
-		return fmt.Errorf("sequence '%s' not found", name)
-	}
-
-	ctx := context.Background()
-	for _, s := range seq {
-		h.HandleCmd(ctx, s.Cmd)
-	}
-	return nil
-}
-
 func (h *ReplCmdHandler) SetPrompt(newPrompt string, mascot string) {
 	h.rl.SetPrompt(FormatPrompt(newPrompt, mascot))
 }
@@ -886,6 +879,7 @@ func (h *ReplCmdHandler) repl() {
 	}
 
 	h.SetPrompt(h.appCfg.GetPrompt(), h.appCfg.GetPromptMascot())
+	h.SuppressStdOut()
 	go h.listenForTaskUpdates()
 	for {
 		line, err := h.rl.Readline()
@@ -895,7 +889,7 @@ func (h *ReplCmdHandler) repl() {
 		} else if err == io.EOF {
 			quitShell := h.ExitCmdMode()
 			if quitShell {
-				fmt.Println("so long..👋")
+				h.println("so long..👋")
 				break
 			}
 		}
@@ -904,7 +898,7 @@ func (h *ReplCmdHandler) repl() {
 			continue
 		}
 		tokens := strings.Fields(line)
-		h.Handle(tokens)
+		h.HandleCmd(h.defaultCtx, tokens)
 	}
 }
 
@@ -935,6 +929,56 @@ func (h *ReplCmdHandler) activateListeners() {
 		}
 		rlCfg.KeyListeners[lsnr.key] = lsnr.handler
 	}
+}
+
+func (h *ReplCmdHandler) SuppressStdOut() {
+	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
+	if err != nil {
+		panic("Failed to open /dev/tty: " + err.Error())
+	}
+	h.tty = tty
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		panic("Pipe failed: " + err.Error())
+	}
+
+	os.Stdout = w
+
+	go func() {
+		io.Copy(io.Discard, r)
+	}()
+}
+
+func (h *ReplCmdHandler) printf(formatStr string, a ...any) {
+	s := fmt.Sprintf(formatStr, a...)
+	h.rl.Write([]byte(s))
+}
+
+func (h *ReplCmdHandler) print(s string) {
+	h.rl.Write([]byte(s))
+}
+
+func (h *ReplCmdHandler) Out(cmdCtx *CmdCtx, str string) {
+	isPrintable := h.GetDefaultCtxId() == cmdCtx.ID() ||
+		h.currFgTaskId == cmdCtx.Task.GetId()
+
+	if isPrintable {
+		h.println(str)
+	}
+}
+
+func (h *ReplCmdHandler) OutF(cmdCtx *CmdCtx, formatStr string, a ...any) {
+	isPrintable := h.GetDefaultCtxId() == cmdCtx.ID() ||
+		h.currFgTaskId == cmdCtx.Task.GetId()
+
+	if isPrintable {
+		h.printf(formatStr, a...)
+	}
+}
+
+func (h *ReplCmdHandler) println(s string) {
+	h.rl.Write(append([]byte(s), '\n'))
 }
 
 func (h *ReplCmdHandler) Bootstrap(omitSysCmds bool) {
@@ -975,8 +1019,8 @@ func (h *ReplCmdHandler) AttemptToBringLastBgTaskToFg() {
 	h.fgTaskIdChan <- h.lastBgTaskId
 }
 
-func (h *ReplCmdHandler) GetDefaultCtxId() CmdCtxID {
-	id, _ := h.defaultCtx.Value(CmdCtxIdKey).(CmdCtxID) // Yeah yeah don't worry.. there won't be a case where this is otherwise ^_^
+func (h *ReplCmdHandler) GetDefaultCtxId() string {
+	id, _ := h.defaultCtx.Value(CmdCtxIdKey).(string) // Yeah yeah don't worry.. there won't be a case where this is otherwise ^_^
 	return id
 }
 

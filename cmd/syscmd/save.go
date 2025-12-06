@@ -3,7 +3,6 @@ package syscmd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
@@ -37,7 +36,7 @@ func (s *CmdSave) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	}
 
 	hdlr.Inject(reqCmd)
-	fmt.Println("request saved successfully")
+	hdlr.Out(cmdCtx, "request saved successfully")
 	return ctx, nil
 }
 

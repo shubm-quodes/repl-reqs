@@ -47,7 +47,8 @@ func (dltVar *CmdDeleteVar) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error)
 		}
 	}
 
-	fmt.Printf("done, '%s' gone forever lost in the clouds ☁️\n", strings.Join(tokens, ", "))
+	dltVar.GetCmdHandler().
+		OutF(cmdCtx, "done, '%s' gone forever lost in the clouds ☁️\n", strings.Join(tokens, ", "))
 	return ctx, nil
 }
 

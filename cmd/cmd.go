@@ -56,6 +56,14 @@ type CmdHandler interface {
 
 	ListSequences()
 
+	printf(formatStr string, a ...any)
+
+	println(string)
+
+	Out(*CmdCtx, string)
+
+	OutF(cmdCtx *CmdCtx, formatStr string, a ...any)
+
 	RegisterSequence(sequenceName string) error
 
 	ResolveCommand(c Cmd, tokens []string) (Cmd, []string)

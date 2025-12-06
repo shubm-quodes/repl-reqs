@@ -1,12 +1,9 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	"github.com/shubm-quodes/repl-reqs/config"
@@ -44,15 +41,6 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 		task.Fail(err)
 		return
 	}
-
-	// --- Output Redirection ---
-
-	originalStdout := os.Stdout
-
-	var buf bytes.Buffer
-
-	r, w, _ := os.Pipe()
-	os.Stdout = w
 
 	errChan := make(chan error)
 	go func() {
@@ -97,27 +85,17 @@ func (pl *CmdPlay) ExecuteAsync(cmdCtx *CmdCtx) {
 		errChan <- execErr
 	}()
 
-	go func() {
-		io.Copy(&buf, r)
-	}()
-
 	execErr := <-errChan
 
-	w.Close()
-	os.Stdout = originalStdout
-
 	if execErr != nil {
-		fmt.Fprint(os.Stderr, buf.String())
 		task.Fail(
 			fmt.Errorf("sequence '%s' failed at step: %w", sequenceName, execErr),
 		)
 		return
 	}
 
-	task.CompleteWithMessage(
-		fmt.Sprintf("sequence '%s' successfully completed\n", sequenceName),
-		nil,
-	)
+	task.AppendOutput(fmt.Sprintf("sequence '%s' successfully completed\n", sequenceName))
+	task.Complete(nil)
 }
 
 func (pl *CmdPlay) cloneSequence(originalSeq []*Step) []*Step {

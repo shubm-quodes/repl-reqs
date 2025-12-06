@@ -172,8 +172,9 @@ func (ec *CmdEnv) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	mgr := c.GetEnvManager()
 	mgr.SetActiveEnv(env)
 
-	ec.GetCmdHandler().UpdatePromptEnv()
-	fmt.Printf(`Environment now set to "%s"`+"\n", env)
+	hdlr := ec.GetCmdHandler()
+	hdlr.UpdatePromptEnv()
+	hdlr.OutF(cmdCtx, `Environment now set to "%s"`+"\n", env)
 	return ctx, nil
 }
 
@@ -189,7 +190,7 @@ func (vc *CmdVar) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	name, val := tokens[0], strings.Join(tokens[1:], " ")
 
 	mgr.SetVar(name, val)
-	fmt.Printf("'%s' now set to '%s'\n", name, val)
+	vc.GetCmdHandler().OutF(cmdCtx, "'%s' now set to '%s'\n", name, val)
 
 	return ctx, nil
 }

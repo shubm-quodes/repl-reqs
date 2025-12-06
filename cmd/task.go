@@ -6,7 +6,8 @@ import (
 )
 
 const (
-	TaskStatusInitiated = "initiated"
+	TaskStatusInitiated        = "initiated"
+	DefaultTaskIdNonTrackingID = "0x0"
 )
 
 type TaskStatus struct {
@@ -28,6 +29,10 @@ type TaskUpdater interface {
 	SetResult(result any)
 
 	GetResult() any
+
+	GetId() string
+
+	GetOutput() string
 
 	Fail(err error)
 
@@ -133,4 +138,12 @@ func (t *Task) GetStatus() TaskStatus {
 
 func (t *Task) GetResult() any {
 	return t.status.Result
+}
+
+func (t *Task) GetId() string {
+	return t.status.ID
+}
+
+func (t *Task) GetOutput() string {
+	return t.status.Output
 }

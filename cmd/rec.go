@@ -51,7 +51,7 @@ func (cr *CmdRec) registerNewSequence(sequenceName string) error {
 		cr.currSequenceName = sequenceName
 	}
 
-	fmt.Printf("Registered new sequence '%s'\n", sequenceName)
+	hdlr.printf("Registered new sequence '%s'\n", sequenceName)
 	return nil
 }
 
@@ -99,6 +99,7 @@ func (cr *CmdRec) cleanup() {
 		return
 	}
 
-	cr.GetCmdHandler().DiscardSequence(cr.currSequenceName)
-	fmt.Printf("sequence '%s' was not finalized\n", cr.currSequenceName)
+	hdlr := cr.GetCmdHandler()
+	hdlr.DiscardSequence(cr.currSequenceName)
+	hdlr.printf("sequence '%s' was not finalized\n", cr.currSequenceName)
 }

@@ -2,7 +2,6 @@ package syscmd
 
 import (
 	"context"
-	"fmt"
 	"sort"
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
@@ -39,9 +38,11 @@ type CmdLsSequences struct {
 func (ls *CmdLsVars) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	envMgr := config.GetEnvManager()
 	envVars := envMgr.GetActiveEnvVars()
+	hdlr := ls.GetCmdHandler()
 
 	if len(envVars) == 0 {
-		fmt.Printf(
+		hdlr.OutF(
+			cmdCtx,
 			"\nNo variables in the currently active env: '%s' 🫤\n\n",
 			envMgr.GetActiveEnvName(),
 		)
@@ -55,13 +56,14 @@ func (ls *CmdLsVars) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 
 	sort.Strings(keys)
 
-	fmt.Printf(
+	hdlr.OutF(
+		cmdCtx,
 		"\n📦 Variables - (In currently active environment: '%s')\n\n",
 		envMgr.GetActiveEnvName(),
 	)
 	for i, name := range keys {
 		value := envVars[name]
-		fmt.Printf("%d. %s: %s\n", i+1, name, util.GetTruncatedStr(value))
+		hdlr.OutF(cmdCtx, "%d. %s: %s\n", i+1, name, util.GetTruncatedStr(value))
 	}
 
 	return cmdCtx.Ctx, nil
