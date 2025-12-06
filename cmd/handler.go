@@ -483,11 +483,21 @@ func (h *ReplCmdHandler) isSeqStepCtx(ctx context.Context) bool {
 
 func (h *ReplCmdHandler) HandleAsyncSeqStep(cmd AsyncCmd, cmdCtx *CmdCtx) {
 	ctx := cmdCtx.Ctx
-	if step, ok := ctx.Value(StepKey).(*Step); ok {
-		step.Task = cmdCtx.Task
+	step, ok := ctx.Value(StepKey).(*Step)
+	if !ok {
+		cmdCtx.Task.Fail(fmt.Errorf("cannot execute async seq step; no step available in context"))
+		return
 	}
 
-	cmd.ExecuteAsync(cmdCtx)
+	originalTask := cmdCtx.Task
+	if step.ParentStep != nil && step.ParentStep.HasFailed {
+		step.HasFailed = true //Cascade
+		originalTask.Fail(errors.New("cannot proceed parent step failed"))
+	} else {
+		cmdCtx.Task = step.Task
+		cmd.ExecuteAsync(cmdCtx)
+		step.watchForUpdates(originalTask)
+	}
 }
 
 func (h *ReplCmdHandler) HandleAsyncCmd(
@@ -881,7 +891,7 @@ func (h *ReplCmdHandler) repl() {
 		line, err := h.rl.Readline()
 
 		if err == readline.ErrInterrupt {
-			continue
+			h.bgTaskIdChan <- h.currFgTaskId
 		} else if err == io.EOF {
 			quitShell := h.ExitCmdMode()
 			if quitShell {

@@ -13,9 +13,13 @@ import (
 )
 
 type Step struct {
-	Name string   `json:"name"`
-	Cmd  []string `json:"cmd"`
-	Task TaskUpdater
+	Name            string   `json:"name"`
+	Cmd             []string `json:"cmd"`
+	sequenceErrChan chan error
+	uChan           chan TaskStatus
+	Task            TaskUpdater
+	ParentStep      *Step
+	HasFailed       bool
 }
 
 var (
@@ -285,4 +289,23 @@ func (s *Step) SetCmd(cmd []string) {
 // GetName returns the step name
 func (s *Step) GetName() string {
 	return s.Name
+}
+
+// Blocks and waits for updates from the underlying step cmd
+func (s *Step) watchForUpdates(originalTask TaskUpdater) {
+	u := <-s.uChan //block until complete
+	if u.Error != nil {
+		s.sequenceErrChan <- fmt.Errorf(
+			"sequence step %s failed. failed to exec cmd %s: %s",
+			s.GetName(),
+			strings.Join(s.GetCmd(), " "),
+			u.Error.Error(),
+		)
+		s.HasFailed = true
+		originalTask.AppendOutput(u.Output)
+		originalTask.Fail(u.Error)
+	} else {
+		originalTask.AppendOutput(u.Output)
+		originalTask.CompleteWithMessage(u.Message, u.Result)
+	}
 }
