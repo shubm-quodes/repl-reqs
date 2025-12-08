@@ -18,12 +18,12 @@ const (
 	saveDebounce     = 500 * time.Millisecond
 )
 
-type environment string
+type Environment string
 
 type envManager struct {
-	variables    map[environment]map[string]string
+	variables    map[Environment]map[string]string
 	mu           sync.RWMutex
-	activeEnv    environment
+	activeEnv    Environment
 	filePath     string
 	saveChan     chan struct{}
 	saveTimer    *time.Timer
@@ -41,7 +41,7 @@ var manager *envManager
 
 func init() {
 	manager = &envManager{
-		variables:    make(map[environment]map[string]string),
+		variables:    make(map[Environment]map[string]string),
 		activeEnv:    EnvDefaultGlobal,
 		filePath:     filepath.Join(GetDefConfDirPath(), envFileName),
 		saveChan:     make(chan struct{}, 1),
@@ -63,6 +63,7 @@ func (m *envManager) load() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.variables[EnvDefaultGlobal] = make(map[string]string)
 	data, err := os.ReadFile(m.filePath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -79,13 +80,13 @@ func (m *envManager) load() {
 		return
 	}
 
-	m.variables = make(map[environment]map[string]string)
+	m.variables = make(map[Environment]map[string]string)
 	for envName, vars := range envData.Variables {
-		m.variables[environment(envName)] = vars
+		m.variables[Environment(envName)] = vars
 	}
 
 	if envData.ActiveEnv != "" {
-		m.activeEnv = environment(envData.ActiveEnv)
+		m.activeEnv = Environment(envData.ActiveEnv)
 	}
 }
 
@@ -190,7 +191,7 @@ func (m *envManager) GetVar(key string) (string, bool) {
 func (m *envManager) SetActiveEnv(env string) {
 	m.mu.Lock()
 	cleanEnv := sanitizeEnvName(env)
-	m.activeEnv = environment(cleanEnv)
+	m.activeEnv = Environment(cleanEnv)
 	if _, exists := m.variables[m.activeEnv]; !exists {
 		m.variables[m.activeEnv] = make(map[string]string)
 	}
@@ -216,10 +217,10 @@ func (m *envManager) GetActiveEnvName() string {
 	return string(m.activeEnv)
 }
 
-func (m *envManager) ListEnvs() []environment {
+func (m *envManager) ListEnvs() []Environment {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	envs := make([]environment, 0, len(m.variables))
+	envs := make([]Environment, 0, len(m.variables))
 	for e := range m.variables {
 		envs = append(envs, e)
 	}

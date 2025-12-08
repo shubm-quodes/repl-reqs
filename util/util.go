@@ -195,8 +195,8 @@ func ArrInclObj(arr []map[string]any, key string) (includes bool) {
 	return
 }
 
-func StrArrToRune(sArr []string) [][]rune {
-	return MapSlice(sArr, func(s string, _ int) []rune {
+func StrArrToRune[T ~string](sArr []T) [][]rune {
+	return MapSlice(sArr, func(s T, _ int) []rune {
 		return []rune(s)
 	})
 }
@@ -398,4 +398,25 @@ func ReverseSlice[T any](s []T) []T {
 	}
 
 	return reversed
+}
+
+func FilterPrefixedStrsWithOffset[T ~string](data []T, prefix T, omitExact bool) []T {
+	var matches []T
+	pStr := string(prefix)
+
+	for _, s := range data {
+		sStr := string(s)
+
+		if !strings.HasPrefix(sStr, pStr) {
+			continue
+		}
+
+		if omitExact && sStr == pStr {
+			continue
+		}
+
+		matches = append(matches, s[len(prefix):])
+	}
+
+	return matches
 }

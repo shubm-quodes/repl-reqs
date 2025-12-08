@@ -17,6 +17,7 @@ const (
 	CmdLsVarsName      = "vars"
 	CmdLsTasksName     = "tasks"
 	CmdLsSequencesName = "sequences"
+	CmdLsEnvName       = "envs"
 )
 
 type CmdLs struct {
@@ -32,6 +33,10 @@ type CmdLsTasks struct {
 }
 
 type CmdLsSequences struct {
+	*cmd.BaseNonModeCmd
+}
+
+type CmdLsEnvs struct {
 	*cmd.BaseNonModeCmd
 }
 
@@ -76,5 +81,22 @@ func (ls *CmdLsTasks) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 
 func (ls *CmdLsSequences) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	ls.GetCmdHandler().ListSequences()
+	return cmdCtx.Ctx, nil
+}
+
+func (lsEnvs *CmdLsEnvs) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	hdlr := lsEnvs.GetCmdHandler()
+	envs := config.GetEnvManager().ListEnvs()
+
+	if len(envs) == 0 {
+		hdlr.Out(cmdCtx, "\nno envs have been initialized yet :/\n")
+		return cmdCtx.Ctx, nil
+	}
+
+	for i, e := range envs {
+		hdlr.Out(cmdCtx, "\nEnvironments- \n")
+		hdlr.OutF(cmdCtx, "%d.) %s\n", i+1, e)
+	}
+
 	return cmdCtx.Ctx, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/shubm-quodes/repl-reqs/cmd"
+	"github.com/shubm-quodes/repl-reqs/config"
 	c "github.com/shubm-quodes/repl-reqs/config"
 	"github.com/shubm-quodes/repl-reqs/network"
 	"github.com/shubm-quodes/repl-reqs/util"
@@ -210,6 +211,19 @@ func (vc *CmdVar) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 
 func (vc *CmdVar) GetModeName() string {
 	return "$set var 📦"
+}
+
+func (ce *CmdEnv) GetSuggestions(tokens [][]rune) ([][]rune, int) {
+	var search config.Environment
+	envs := config.GetEnvManager().ListEnvs()
+	if len(tokens) > 1 {
+		return nil, 0
+	} else if len(tokens) == 1 {
+		search = config.Environment(tokens[0])
+	}
+
+	matches := util.FilterPrefixedStrsWithOffset(envs, search, true)
+	return util.StrArrToRune(matches), len(search)
 }
 
 func (pc *CmdPrompt) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
