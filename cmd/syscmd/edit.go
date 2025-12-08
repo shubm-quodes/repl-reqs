@@ -32,6 +32,12 @@ func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 
 	if len(tokens) == 0 {
 		rd = er.Mgr.PeakRequestDraft(cmdCtx.ID())
+		if rd == nil {
+			return ctx, fmt.Errorf(
+				"no drafts, start drafting requests using %s command",
+				CmdDraftReqName,
+			)
+		}
 	} else {
 		c, remainingTokens := er.GetCmdHandler().ResolveCommandFromRoot(tokens)
 		if c == nil || len(remainingTokens) > 0 {

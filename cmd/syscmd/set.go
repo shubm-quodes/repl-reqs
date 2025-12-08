@@ -96,6 +96,13 @@ func (ch *CmdHeader) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	key, val := tokens[0], tokens[1]
 	reqDraft := ch.Mgr.PeakRequestDraft(cmdCtx.ID())
 
+	if reqDraft == nil {
+		return ctx, fmt.Errorf(
+			"no drafts, start drafting requests using %s command",
+			CmdDraftReqName,
+		)
+	}
+
 	reqDraft.SetHeader(key, val)
 	return ctx, nil
 }
@@ -129,6 +136,12 @@ func (cmh *CmdQuery) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	key, val := tokens[0], strings.Join(tokens[1:], " ")
 	rMgr := cmh.Mgr
 	draft := rMgr.PeakRequestDraft(cmdCtx.ID())
+	if draft == nil {
+		return ctx, fmt.Errorf(
+			"no drafts, start drafting requests using %s command",
+			CmdDraftReqName,
+		)
+	}
 	draft.SetQueryParam(key, val)
 	return ctx, nil
 }

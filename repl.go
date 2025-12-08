@@ -18,12 +18,26 @@ var (
 )
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "Fatal runtime error: %v\n", r)
+			os.Exit(1)
+		}
+	}()
+
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	flags := config.InitializeFlags()
 	flags.Process()
 
 	if flags.ShowVersion {
 		fmt.Printf("repl-reqs: v%s %s\n", version, buildDate)
-		os.Exit(0)
+		return nil
 	}
 
 	cfg := config.Initialize(flags, version)
@@ -33,14 +47,15 @@ func main() {
 		syscmd.RegisterCmds(reg)
 	}
 
-	if cmdHandler, err := cmd.NewCmdHandler(cfg, config.NewShellCfg(cfg), reg); err != nil {
-		fmt.Println("failed to initialize command handler", err)
-		os.Exit(1)
-	} else {
-		if err := syscmd.InitNetCmds(cfg.RawCfg, cmdHandler); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		cmdHandler.Bootstrap(omitSystemCommands == "true")
+	cmdHandler, err := cmd.NewCmdHandler(cfg, config.NewShellCfg(cfg), reg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize command handler: %w", err)
 	}
+
+	if err := syscmd.InitNetCmds(cfg.RawCfg, cmdHandler); err != nil {
+		return err
+	}
+
+	cmdHandler.Bootstrap(omitSystemCommands == "true")
+	return nil
 }

@@ -428,7 +428,7 @@ func (h *ReplCmdHandler) isCmdEligibleForMode(cmd Cmd, args []string) bool {
 
 func (h *ReplCmdHandler) HandleSyncCmdResult(cmdCtx *CmdCtx, err error) {
 	if err != nil {
-		h.Out(cmdCtx, err.Error())
+		h.Out(cmdCtx, color.HiRedString(fmt.Sprintf("failed: %s", err.Error())))
 	} else if strings.Trim(cmdCtx.Task.GetOutput(), "") != "" {
 		h.Out(cmdCtx, cmdCtx.Task.GetOutput())
 	}

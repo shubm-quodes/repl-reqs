@@ -5,6 +5,7 @@ BUILD_DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 OMIT_SYSTEM_COMMANDS := $(if $(OMIT_SYS_CMDS),true,false)
 
 LDFLAGS := -ldflags "\
+	-s -w \
 	-X main.version=$(VERSION) \
 	-X main.buildDate=$(BUILD_DATE) \
 	-X main.omitSystemCommands=$(OMIT_SYSTEM_COMMANDS) \
@@ -21,14 +22,14 @@ build: dirs
 	go build $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs repl.go
 
 linux: dirs
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-linux-amd64 repl.go
+	GOOS=linux GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-linux-amd64 repl.go
 
 windows: dirs
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-windows-amd64.exe repl.go
+	GOOS=windows GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-windows-amd64.exe repl.go
 
 mac: dirs
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-darwin-amd64 repl.go
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-darwin-arm64 repl.go
+	GOOS=darwin GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-darwin-amd64 repl.go
+	GOOS=darwin GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(BUILD_DIR)/repl-reqs-darwin-arm64 repl.go
 
 all: clean linux windows mac build
 
