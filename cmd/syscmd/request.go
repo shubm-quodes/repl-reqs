@@ -286,7 +286,8 @@ func (rc *ReqCmd) register(
 			rc.Name_ = string(token)
 			subCmd.AddSubCmd(rc)
 		} else {
-			subCmd = subCmd.AddSubCmd(NewReqCmd(string(token), rMgr))
+			subCmd.AddSubCmd(NewReqCmd(string(token), rMgr))
+			subCmd, _ = subCmd.GetSubCmds()[string(token)]
 		}
 	}
 }
