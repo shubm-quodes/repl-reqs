@@ -111,3 +111,7 @@ func (er *CmdEditReq) suggestRootCmds(tokens [][]rune) ([][]rune, int) {
 func (er *CmdEditReq) isValidEdtReqCmdToken(token []rune) bool {
 	return len(token) == 0 || token[0] != '$'
 }
+
+func (er *CmdEditReq) AllowInModeWithoutArgs() bool {
+	return false
+}
