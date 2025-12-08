@@ -200,7 +200,7 @@ func Walk(
 
 	subCmdName := string(tokens[0])
 	if subCmd, ok := subCmdMap[subCmdName]; ok {
-		return Walk(subCmd, subCmdMap, tokens[1:])
+		return Walk(subCmd, subCmd.GetSubCmds(), tokens[1:])
 	}
 
 	return tokens, cmd

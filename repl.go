@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
 	"github.com/shubm-quodes/repl-reqs/cmd/syscmd"
@@ -18,17 +20,36 @@ var (
 )
 
 func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "Fatal runtime error: %v\n", r)
-			os.Exit(1)
-		}
-	}()
+	setupGracefulShutdown()
 
-	if err := run(); err != nil {
+	err := safeRun()
+	config.GetEnvManager().Shutdown()
+
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func setupGracefulShutdown() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		fmt.Fprintln(os.Stderr, "\nShutting down gracefully...")
+		config.GetEnvManager().Shutdown()
+		os.Exit(0)
+	}()
+}
+
+func safeRun() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("fatal runtime error: %v", r)
+		}
+	}()
+	return run()
 }
 
 func run() error {
