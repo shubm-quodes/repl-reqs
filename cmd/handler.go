@@ -295,9 +295,10 @@ func (h *ReplCmdHandler) SuggestCmds(tokens [][]rune) ([][]rune, int) {
 
 func (h *ReplCmdHandler) SuggestVarNames(partial string) [][]rune {
 	partial = strings.Trim(partial, " ")
-	search := ""
+	var search string
+
 	if len(partial) > 2 {
-		search = partial[2:]
+		search = partial[strings.LastIndex(partial, "{")+1:]
 	}
 
 	envMgr := config.GetEnvManager()
@@ -367,10 +368,6 @@ func (h *ReplCmdHandler) Do(line []rune, pos int) (suggestions [][]rune, offset 
 	leadingSpaceCount := len(line) - len(trimmed)
 	if offset > 0 && leadingSpaceCount > 0 {
 		return nil, 0
-	}
-
-	if pos == len(trimmed) && offset == 0 {
-		prependSpc(&suggestions) // Ouch! Frankly I don't remember why I did this..
 	}
 
 	return suggestions, offset
