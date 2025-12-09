@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -286,7 +287,20 @@ func (c *BaseCmd) getSuggestions(
 }
 
 func (c *BaseCmd) Execute(cmdCtx *CmdCtx) (context.Context, error) {
-	return cmdCtx.Ctx, nil
+	var msg string
+
+	subCmds := c.GetSubCmdList()
+	if len(subCmds) != 0 {
+		msg = fmt.Sprintf(
+			"failed to execute '%s': valid sub commands are '%s'",
+			c.Name(),
+			strings.Join(subCmds, " | "),
+		)
+	} else {
+		msg = fmt.Sprintf("failed to execute %s, execution strategy missing", c.Name())
+	}
+
+	return cmdCtx.Ctx, errors.New(msg)
 }
 
 func (c *BaseCmd) cleanup() {}
