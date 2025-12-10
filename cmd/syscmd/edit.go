@@ -2,11 +2,17 @@ package syscmd
 
 import (
 	"context"
+	"encoding/json"
+	"encoding/xml"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
+	"github.com/shubm-quodes/repl-reqs/config"
+	"github.com/shubm-quodes/repl-reqs/log"
 	"github.com/shubm-quodes/repl-reqs/network"
+	"github.com/shubm-quodes/repl-reqs/util"
 )
 
 const (
@@ -14,8 +20,9 @@ const (
 	CmdEditName = "$edit"
 
 	// Sub commands
-	CmdEditReqName = "req"
-	CmdEditSeqName = "sequence"
+	CmdEditReqName      = "request"
+	CmdEditRespBodyName = "response_body"
+	CmdEditSeqName      = "sequence"
 )
 
 type CmdEdit struct {
@@ -23,6 +30,10 @@ type CmdEdit struct {
 }
 
 type CmdEditReq struct {
+	*BaseReqCmd
+}
+
+type CmdEditRespBody struct {
 	*BaseReqCmd
 }
 
@@ -59,6 +70,51 @@ func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 		er.Mgr.AddDraftRequest(cmdCtx.ID(), rd)
 	}
 	return ctx, rd.EditAsToml()
+}
+
+func (er *CmdEditRespBody) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	trackerReq, err := er.Mgr.PeakTrackerRequest(cmdCtx.ID())
+
+	if err != nil {
+		return cmdCtx.Ctx, err
+	}
+
+	if trackerReq.ResponseBody == nil {
+		return cmdCtx.Ctx, errors.New(
+			"request still seems to be in progress, you could track it's status using $ls tasks cmd",
+		)
+	}
+
+	return cmdCtx.Ctx, er.OpenEditor(trackerReq)
+}
+
+func (er *CmdEditRespBody) OpenEditor(req *network.TrackerRequest) error {
+	contentType, ok := req.ResponseHeaders["Content-Type"]
+	if !ok {
+		return errors.New("content type header no found, failed to infer editor for response body")
+	}
+
+	respBytes, err := util.ReadAndResetIoCloser(&req.ResponseBody)
+	if err != nil {
+		log.Debug("failed to process response body for the last request: %w", err.Error())
+		return errors.New("failed to process response body for the last request")
+	}
+
+	var respBody any
+	if strings.ToLower(contentType[0]) == "application/json" {
+		if err = json.Unmarshal(respBytes, &respBody); err != nil {
+			log.Debug("failed to unmarshal json response %w", err)
+			return errors.New("failed to unmarshal json response")
+		}
+		return util.EditJSON(&respBody, config.GetAppCfg().GetDefaultEditor())
+	}
+
+	if err = xml.Unmarshal(respBytes, &respBody); err != nil {
+		log.Debug("failed to unmarshal xml response %w,", err)
+		return errors.New("failed to unmarshal xml response")
+	}
+
+	return util.EditXML(&respBody, config.GetAppCfg().GetDefaultEditor())
 }
 
 func (er *CmdEditReq) GetSuggestions(tokens [][]rune) ([][]rune, int) {
@@ -113,5 +169,9 @@ func (er *CmdEditReq) isValidEdtReqCmdToken(token []rune) bool {
 }
 
 func (er *CmdEditReq) AllowInModeWithoutArgs() bool {
+	return false
+}
+
+func (er *CmdEditRespBody) AllowInModeWithoutArgs() bool {
 	return false
 }

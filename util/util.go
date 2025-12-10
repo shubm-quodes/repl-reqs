@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -419,4 +420,20 @@ func FilterPrefixedStrsWithOffset[T ~string](data []T, prefix T, omitExact bool)
 	}
 
 	return matches
+}
+
+func ReadAndResetIoCloser(ioCloser *io.ReadCloser) ([]byte, error) {
+	if ioCloser == nil || *ioCloser == nil {
+		return nil, nil
+	}
+
+	data, err := io.ReadAll(*ioCloser)
+	if err != nil {
+		return nil, err
+	}
+
+	// Reset the body for next read
+	*ioCloser = io.NopCloser(bytes.NewReader(data))
+
+	return data, nil
 }

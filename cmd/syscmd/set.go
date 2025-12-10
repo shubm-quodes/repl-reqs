@@ -30,7 +30,7 @@ const (
 	CmdQueryName        = "query"
 	CmdHeaderName       = "header"
 	CmdMultiHeadersName = "multi-headers"
-	CmdHTTPVerbName     = "httpVerb"
+	CmdMethodName       = "method"
 	CmdBodyName         = "body"
 	CmdPromptName       = "prompt"
 	CmdMascotName       = "mascot"
@@ -62,7 +62,7 @@ type CmdMultiHeaders struct {
 	mu  *sync.Mutex
 }
 
-type CmdHTTPVerb struct {
+type CmdMethod struct {
 	*BaseReqCmd
 }
 
@@ -147,6 +147,25 @@ func (cmh *CmdQuery) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	return ctx, nil
 }
 
+func (cb *CmdBody) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	if cb.Mgr == nil {
+		return cmdCtx.Ctx, errors.New("failed to set body, manager unavailable")
+	}
+	if len(cmdCtx.ExpandedTokens) == 0 {
+		return cmdCtx.Ctx, errors.New("please specify body :/")
+	}
+
+	body := strings.Join(cmdCtx.ExpandedTokens[0:], " ")
+	draft := cb.Mgr.PeakRequestDraft(cmdCtx.ID())
+
+	if draft != nil {
+		draft.SetBody(body)
+		return cmdCtx.Ctx, nil
+	}
+
+	return cmdCtx.Ctx, errors.New("no request to draft")
+}
+
 func (cmh *CmdMultiHeaders) setHeader(key, val string) error {
 	if util.AreEmptyStrs(key, val) {
 		return errors.New("please provide both header key and value")
@@ -155,15 +174,15 @@ func (cmh *CmdMultiHeaders) setHeader(key, val string) error {
 	return nil
 }
 
-func (chv *CmdHTTPVerb) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+func (chv *CmdMethod) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
-		return ctx, errors.New("please specify httpverb")
+		return ctx, errors.New("please specify http method")
 	}
 
 	httpVerb := tokens[0]
 	if !network.IsValidHttpVerb(network.HTTPMethod(httpVerb)) {
-		return ctx, fmt.Errorf(`invalid httpVerb "%s"`, httpVerb)
+		return ctx, fmt.Errorf(`invalid http method "%s"`, httpVerb)
 	}
 
 	draft := chv.Mgr.PeakRequestDraft(cmdCtx.ID())

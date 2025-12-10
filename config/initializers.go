@@ -62,7 +62,7 @@ func NewShellCfg(cfg *AppCfg) *readline.Config {
 
 func IsNotValidEditor(name string) bool {
 	return name == "" ||
-		!slices.Contains([]string{"vi", "vim", "nano", "notepad", "sam"}, name)
+		!slices.Contains([]string{"vi", "vim", "nano", "notepad", "sam", "nvim"}, name)
 }
 
 func getDefaultEditor() string {

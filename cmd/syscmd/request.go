@@ -21,8 +21,6 @@ import (
 	"github.com/alecthomas/chroma"
 	"github.com/alecthomas/chroma/lexers"
 	"github.com/alecthomas/chroma/styles"
-
-	"github.com/briandowns/spinner"
 )
 
 const (
@@ -68,9 +66,6 @@ type CmdParams struct {
 	Query map[string]string
 	Body  map[string]any
 }
-
-var StopSpinnerChannel chan bool = make(chan bool)
-var S *spinner.Spinner
 
 type ReqSubCmd map[string]*ReqCmd
 
@@ -564,11 +559,11 @@ func (rc *ReqCmd) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 		return
 	}
 
-	rc.MakeRequest(req, task)
+	rc.MakeRequest(req, cmdCtx, task)
 }
 
-func (rc *ReqCmd) MakeRequest(req *http.Request, task cmd.TaskUpdater) {
-	_, netUpdate, err := rc.Mgr.MakeRequest(req)
+func (rc *ReqCmd) MakeRequest(req *http.Request, cmdCtx *cmd.CmdCtx, task cmd.TaskUpdater) {
+	_, netUpdate, err := rc.Mgr.MakeRequestWithContext(cmdCtx.ID(), req)
 
 	if err != nil {
 		task.Fail(err)
@@ -584,15 +579,11 @@ func (rc *ReqCmd) MakeRequest(req *http.Request, task cmd.TaskUpdater) {
 }
 
 func (rc *ReqCmd) readAndUnmarshalResponse(resp *http.Response, target map[string]any) error {
-	bodyBytes, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	bodyBytes, err := util.ReadAndResetIoCloser(&resp.Body) // Not closing it, for further reads.
 
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
-
-	// Restore it so it can be read again later
-	resp.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
 
 	err = json.Unmarshal(bodyBytes, &target)
 	if err != nil {

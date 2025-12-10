@@ -55,7 +55,10 @@ func NewRequestTracker() *RequestTracker {
 
 func (rt *RequestTracker) startListener() {
 	for update := range rt.updates {
+		rt.mu.Lock()
 		trackerReq, ok := rt.requests[update.reqId]
+		rt.mu.Unlock()
+
 		if !ok {
 			log.Debug("Tracker could not find request with ID: %s", update.reqId)
 			continue
@@ -64,10 +67,6 @@ func (rt *RequestTracker) startListener() {
 		if update.resp != nil {
 			trackerReq.ResponseHeaders = update.resp.Header
 			trackerReq.StatusCode = update.resp.StatusCode
-		}
-
-		if update.resp != nil && update.resp.Body != nil {
-			trackerReq.ResponseBody = update.resp.Body
 		}
 
 		trackerReq.Status = StatusCompleted
@@ -91,4 +90,3 @@ func (rt *RequestTracker) AddRequest(trackerReq *TrackerRequest) {
 func (r *Request) GetKey() string {
 	return r.ID
 }
-

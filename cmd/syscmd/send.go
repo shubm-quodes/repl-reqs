@@ -28,7 +28,7 @@ func (s *CmdSend) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 	if req, err := draft.Finalize(); err != nil {
 		t.Fail(err)
 	} else {
-		s.MakeRequest(req, t)
+		s.MakeRequest(req, cmdCtx, t)
 	}
 }
 

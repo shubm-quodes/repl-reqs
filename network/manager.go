@@ -1,7 +1,9 @@
 package network
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -15,12 +17,13 @@ type Tracker interface {
 }
 
 type RequestManager struct {
-	tracker       *RequestTracker
-	client        *http.Client
-	commonHeaders http.Header
-	requests      map[string]*util.LRUList[string, *Request]
-	drafts        map[string]*util.LRUList[string, *RequestDraft]
-	mu            sync.Mutex
+	tracker          *RequestTracker
+	client           *http.Client
+	commonHeaders    http.Header
+	requests         map[string]*util.LRUList[string, *Request]
+	drafts           map[string]*util.LRUList[string, *RequestDraft]
+	lastReceivedResp *http.Response
+	mu               sync.Mutex
 }
 
 func NewRequestManager(
@@ -78,6 +81,16 @@ func (rm *RequestManager) GetRequest(context string, index int) (*Request, error
 	return nil, nil
 }
 
+func (rm *RequestManager) GetRequests(context string) ([]*Request, error) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if lru, ok := rm.requests[context]; ok {
+		return lru.GetAll(), nil
+	}
+	return nil, nil
+}
+
 func (rm *RequestManager) GetRequestDrafts(context string) []*RequestDraft {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
@@ -100,56 +113,160 @@ func (rm *RequestManager) PeakRequestDraft(context string) *RequestDraft {
 	return nil
 }
 
-func (rm *RequestManager) GetRequests(context string) ([]*Request, error) {
+func (rm *RequestManager) PeakTrackerRequest(context string) (*TrackerRequest, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	if lru, ok := rm.requests[context]; ok {
-		return lru.GetAll(), nil
+	contextList, ok := rm.requests[context]
+	if !ok {
+		return nil, fmt.Errorf("context '%s' not found", context)
 	}
-	return nil, nil
+
+	lastRequest, _ := contextList.GetAt(0)
+	if lastRequest == nil {
+		return nil, fmt.Errorf("no requests found in context '%s'", context)
+	}
+	tr, ok := rm.tracker.requests[lastRequest.ID]
+	if !ok {
+		return nil, fmt.Errorf("request id '%s' does not exist in tracker", lastRequest.ID)
+	}
+	return tr, nil
 }
 
 func (rm *RequestManager) MakeRequest(req *http.Request) (string, <-chan Update, error) {
+	return rm.makeRequest("", req, false)
+}
+
+func (rm *RequestManager) MakeRequestWithContext(
+	context string,
+	req *http.Request,
+) (string, <-chan Update, error) {
+	return rm.makeRequest(context, req, true)
+}
+
+func (rm *RequestManager) makeRequest(
+	context string,
+	req *http.Request,
+	trackInContext bool,
+) (string, <-chan Update, error) {
 	reqID := uuid.New().String()
-	done := make(Done)
 	rm.copyCommonHeaders(req)
 
-	trackerReq := &TrackerRequest{
+	trackerReq := rm.createTrackerRequest(reqID, req)
+	rm.tracker.AddRequest(trackerReq)
+
+	if trackInContext {
+		// Discard old buffered response if it exists
+		rm.discardOldBufferedResponse(context)
+		rm.addToContext(context, trackerReq.Request)
+	}
+
+	updateChan := make(chan Update)
+	go rm.executeRequest(trackerReq, req, reqID, updateChan, trackInContext)
+
+	return reqID, updateChan, nil
+}
+
+func (rm *RequestManager) createTrackerRequest(reqID string, req *http.Request) *TrackerRequest {
+	return &TrackerRequest{
 		Request: &Request{
 			ID:          reqID,
 			HttpRequest: req,
 		},
 		Status: StatusProcessing,
-		Done:   done,
+		Done:   make(Done),
+	}
+}
+
+func (rm *RequestManager) addToContext(context string, request *Request) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if _, ok := rm.requests[context]; !ok {
+		rm.requests[context] = util.NewLRUList[string, *Request]()
+	}
+	rm.requests[context].AddOrTouch(request)
+}
+
+func (rm *RequestManager) discardOldBufferedResponse(context string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	contextList, ok := rm.requests[context]
+	if !ok {
+		return
 	}
 
-	rm.tracker.AddRequest(trackerReq)
+	lastRequest, _ := contextList.GetAt(0)
+	if lastRequest == nil {
+		return
+	}
+
+	// Get the tracker request and close its buffered body
+	if trackerReq, ok := rm.tracker.requests[lastRequest.ID]; ok {
+		if trackerReq.ResponseBody != nil {
+			trackerReq.ResponseBody.Close()
+			trackerReq.ResponseBody = nil
+		}
+	}
+}
+
+func (rm *RequestManager) executeRequest(
+	trackerReq *TrackerRequest,
+	req *http.Request,
+	reqID string,
+	updateChan chan Update,
+	bufferBody bool,
+) {
+	defer close(trackerReq.Done)
+
+	start := time.Now()
+	resp, err := rm.client.Do(req)
+
+	// Buffer response body ONLY for tracked context requests
+	if bufferBody && err == nil && resp != nil && resp.Body != nil {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if readErr != nil {
+			err = fmt.Errorf("failed to buffer response body: %w", readErr)
+		} else {
+			trackerReq.ResponseBody = io.NopCloser(bytes.NewReader(bodyBytes))
+			resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		}
+	}
+
+	trackerReq.Status = rm.determineStatus(err)
+	trackerReq.RequestTime = time.Since(start)
+
 	update := Update{
 		reqId: reqID,
+		resp:  resp,
+		err:   err,
 	}
 
-	updateChan := make(chan Update)
-	go func(rm *RequestManager, id string, r *http.Request) {
-		defer close(done)
+	rm.lastReceivedResp = resp
+	rm.tracker.updates <- update
+	updateChan <- update
+}
 
-		start := time.Now()
-		resp, err := rm.client.Do(r)
-		if err != nil {
-			update.err = err
-			trackerReq.Status = StatusError
-		}
+func (rm *RequestManager) bufferResponseBody(resp *http.Response) error {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		resp.Body.Close()
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+	resp.Body.Close()
 
-		requestTime := time.Since(start)
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	return nil
+}
 
-		update.resp = resp
-		rm.tracker.updates <- update
-		updateChan <- update
-
-		trackerReq.RequestTime = requestTime
-	}(rm, reqID, req)
-
-	return reqID, updateChan, nil
+func (rm *RequestManager) determineStatus(err error) RequestStatus {
+	if err != nil {
+		return StatusError
+	}
+	return StatusCompleted
 }
 
 func (rm *RequestManager) copyCommonHeaders(req *http.Request) {

@@ -1,6 +1,8 @@
 package util
 
 import (
+	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -111,6 +113,26 @@ func EditorWorkflow(cfg EditorConfig) error {
 	return nil
 }
 
+func JsonEncoder(w io.Writer, data any) error {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(data)
+}
+
+func JsonDecoder(data []byte, v any) error {
+	return json.Unmarshal(data, v)
+}
+
+func XmlEncoder(w io.Writer, data any) error {
+	enc := xml.NewEncoder(w)
+	return enc.Encode(data)
+}
+
+func XmlDecoder(data []byte, v any) error {
+	return json.Unmarshal(data, v)
+}
+
 func TomlEncoder(w io.Writer, data any) error {
 	return toml.NewEncoder(w).Encode(data)
 }
@@ -136,8 +158,8 @@ func EditJSON(data any, editor string) error {
 		TargetDataStructure: data,
 		FileName:            "reql-reqs.payload.json",
 		Editor:              editor,
-		Encoder:             TomlEncoder,
-		Decoder:             TomlDecoder,
+		Encoder:             JsonEncoder,
+		Decoder:             JsonDecoder,
 	}
 
 	return EditorWorkflow(cfg)
@@ -148,8 +170,8 @@ func EditXML(data any, editor string) error {
 		TargetDataStructure: data,
 		FileName:            "reql-reqs.payload.xml",
 		Editor:              editor,
-		Encoder:             TomlEncoder,
-		Decoder:             TomlDecoder,
+		Encoder:             XmlEncoder,
+		Decoder:             XmlDecoder,
 	}
 
 	return EditorWorkflow(cfg)

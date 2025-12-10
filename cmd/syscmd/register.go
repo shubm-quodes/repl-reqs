@@ -9,7 +9,7 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 		AddSubCmd(&CmdURL{NewBaseReqCmd(CmdURLName)}).
 		AddSubCmd(&CmdHeader{NewBaseReqCmd(CmdHeaderName)}).
 		AddSubCmd(&CmdMultiHeaders{BaseReqCmd: NewBaseReqCmd(CmdMultiHeadersName)}).
-		AddSubCmd(&CmdHTTPVerb{NewBaseReqCmd(CmdHTTPVerbName)}).
+		AddSubCmd(&CmdMethod{NewBaseReqCmd(CmdMethodName)}).
 		AddSubCmd(&CmdBody{NewBaseReqCmd(CmdBodyName)}).
 		AddSubCmd(&CmdPrompt{cmd.NewBaseCmd(CmdPromptName, "")}).
 		AddSubCmd(&CmdMascot{cmd.NewBaseCmd(CmdMascotName, "")}).
@@ -31,6 +31,8 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 		AddSubCmd(&CmdDeleteSeq{BaseCmd: cmd.NewBaseCmd(CmdDeleteSeqName, "")})
 
 	edit := &CmdEdit{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditName, "")}}
-	edit.AddSubCmd(&CmdEditReq{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditReqName, "")}})
+	edit.AddSubCmd(&CmdEditReq{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditReqName, "")}}).
+		AddSubCmd(&CmdEditRespBody{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditRespBodyName, "")}})
+
 	reg.RegisterCmd(s, n, send, ls, save, dlt, edit)
 }
