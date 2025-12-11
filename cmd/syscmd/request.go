@@ -3,6 +3,7 @@ package syscmd
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -98,7 +99,7 @@ func NewReqCfgFromCmd(rc *ReqCmd) *ReqCmdCfg {
 	}
 
 	schemaType := "text/html"
-	if cType, ok := rc.RequestDraft.Headers["Content-Type"]; ok {
+	if cType, ok := rc.RequestDraft.GetHeader("content-type"); ok {
 		if cType == "application/json" {
 			schemaType = "json"
 		}
@@ -190,16 +191,19 @@ func (r *ReqCmd) UnmarshalJSON(data []byte) error {
 		RawQueryParams map[string]json.RawMessage `json:"queryParams"`
 		RawUrlParams   map[string]json.RawMessage `json:"urlParams"`
 		RawBody        map[string]json.RawMessage `json:"body"`
+		RequestDraft   *network.RequestDraft      `json:"requestDraft"`
 	}
 
 	if err := json.Unmarshal(data, &rawProps); err != nil {
 		return err
 	}
 
-	r.Name_ = rawProps.Cmd // Temporarily assignment, gets overriden upon registration
+	headers := util.CopyMap(rawProps.Headers, rawProps.RequestDraft.Headers)
+	r.Name_ = rawProps.Cmd // Temporary assignment, gets overriden upon registration
+	r.RequestDraft = rawProps.RequestDraft
 	r.SetUrl(rawProps.Url).
 		SetMethod(rawProps.HttpMethod).
-		SetHeaders(rawProps.Headers)
+		SetHeaders(headers)
 
 	if err := r.initializeVlds(
 		rawProps.RawUrlParams,
@@ -355,49 +359,147 @@ func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
 		Body:  make(map[string]any),
 	}
 
-	processedKeys := make(map[string]bool)
-
-	validate := func(key string, value string, schema map[string]Validation, destMap any) error {
-		if valSchema, ok := schema[key]; ok {
-			validatedValue, err := valSchema.validate(value)
-			if err != nil {
-				return fmt.Errorf("validation failed for parameter '%s': %w", key, err)
-			}
-			switch m := destMap.(type) {
-			case map[string]string:
-				m[key] = fmt.Sprintf("%v", validatedValue)
-			case map[string]any:
-				m[key] = validatedValue
-			}
-			processedKeys[key] = true
-		}
-		return nil
+	if err := rc.processStringParams(parsedParams, rc.ReqPropsSchema.UrlParams, cmdParams.URL, nil, "URL"); err != nil {
+		return nil, err
 	}
 
-	for key, value := range parsedParams {
-		if err := validate(key, value, rc.ReqPropsSchema.UrlParams, cmdParams.URL); err != nil {
-			return nil, err
-		}
-		if processedKeys[key] {
-			continue
-		}
-		if err := validate(key, value, rc.ReqPropsSchema.QueryParams, cmdParams.Query); err != nil {
-			return nil, err
-		}
-		if processedKeys[key] {
-			continue
-		}
-		if err := validate(key, value, rc.ReqPropsSchema.Body, cmdParams.Body); err != nil {
-			return nil, err
-		}
-		if processedKeys[key] {
-			continue
-		}
+	if err := rc.processStringParams(parsedParams, rc.ReqPropsSchema.QueryParams, cmdParams.Query, rc.RequestDraft.QueryParams, "query"); err != nil {
+		return nil, err
+	}
 
-		return nil, fmt.Errorf("unrecognized parameter '%s'", key)
+	if err := rc.processBodyParams(parsedParams, cmdParams); err != nil {
+		return nil, err
+	}
+
+	if len(parsedParams) > 0 {
+		for key := range parsedParams {
+			return nil, fmt.Errorf("unrecognized parameter '%s'", key)
+		}
 	}
 
 	return cmdParams, nil
+}
+
+func (rc *ReqCmd) processStringParams(parsedParams map[string]string, schema map[string]Validation,
+	dest map[string]string, fallback map[string]string, paramType string) error {
+
+	for key, valSchema := range schema {
+		value, exists := parsedParams[key]
+		if !exists {
+			if fallback != nil {
+				if existingValue, ok := fallback[key]; ok {
+					dest[key] = existingValue
+				}
+			}
+			continue
+		}
+		validatedValue, err := valSchema.validate(value)
+		if err != nil {
+			return fmt.Errorf("validation failed for %s parameter '%s': %w", paramType, key, err)
+		}
+		dest[key] = fmt.Sprintf("%v", validatedValue)
+		delete(parsedParams, key)
+	}
+	return nil
+}
+
+func (rc *ReqCmd) processBodyParams(parsedParams map[string]string, cmdParams *CmdParams) error {
+	existingBody, err := rc.parseExistingBody()
+	if err != nil {
+		return fmt.Errorf("failed to parse existing body: %w", err)
+	}
+
+	for key, valSchema := range rc.ReqPropsSchema.Body {
+		value, exists := parsedParams[key]
+		if !exists {
+			if existingValue, ok := existingBody[key]; ok {
+				cmdParams.Body[key] = existingValue
+			}
+			continue
+		}
+		validatedValue, err := valSchema.validate(value)
+		if err != nil {
+			return fmt.Errorf("validation failed for body parameter '%s': %w", key, err)
+		}
+		cmdParams.Body[key] = validatedValue
+		delete(parsedParams, key)
+	}
+	return nil
+}
+
+func (rc *ReqCmd) parseExistingBody() (map[string]any, error) {
+	if rc.RequestDraft.Body == "" {
+		return make(map[string]any), nil
+	}
+
+	contentType := rc.getContentType()
+	fmt.Println("contenttt:", contentType)
+
+	if strings.Contains(contentType, "application/json") {
+		return rc.parseJSONBody()
+	}
+	if strings.Contains(contentType, "xml") {
+		return rc.parseXMLBody()
+	}
+	if strings.Contains(contentType, "text/") {
+		return rc.parseTextBody()
+	}
+
+	// Fallback to JSON
+	result := make(map[string]any)
+	_ = json.Unmarshal([]byte(rc.RequestDraft.Body), &result)
+	return result, nil
+}
+
+func (rc *ReqCmd) parseJSONBody() (map[string]any, error) {
+	result := make(map[string]any)
+	if err := json.Unmarshal([]byte(rc.RequestDraft.Body), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON body: %w", err)
+	}
+	return result, nil
+}
+
+func (rc *ReqCmd) parseXMLBody() (map[string]any, error) {
+	result := make(map[string]any)
+	decoder := xml.NewDecoder(strings.NewReader(rc.RequestDraft.Body))
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse XML: %w", err)
+		}
+
+		if start, ok := token.(xml.StartElement); ok {
+			var value string
+			if err := decoder.DecodeElement(&value, &start); err != nil {
+				return nil, err
+			}
+			result[start.Name.Local] = value
+		}
+	}
+	return result, nil
+}
+
+func (rc *ReqCmd) parseTextBody() (map[string]any, error) {
+	result := make(map[string]any)
+	if len(rc.ReqPropsSchema.Body) == 1 {
+		for key := range rc.ReqPropsSchema.Body {
+			result[key] = rc.RequestDraft.Body
+			break
+		}
+	}
+	return result, nil
+}
+
+func (rc *ReqCmd) getContentType() string {
+	h, ok := rc.RequestDraft.GetHeader("content-type")
+	if ok {
+		return h
+	}
+	return "text/html"
 }
 
 func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {

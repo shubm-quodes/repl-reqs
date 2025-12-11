@@ -88,3 +88,7 @@ func (rc *BaseReqCmd) getSearchQuery(remainingTkns [][]rune) []rune {
 
 	return nil
 }
+
+func (rc *BaseReqCmd) AllowInModeWithoutArgs() bool {
+	return false
+}

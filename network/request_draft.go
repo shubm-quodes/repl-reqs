@@ -55,11 +55,12 @@ func (rd *RequestDraft) GetMethod() HTTPMethod {
 	return rd.Method
 }
 
-func (rd *RequestDraft) GetHeader(key string) string {
+func (rd *RequestDraft) GetHeader(key string) (string, bool) {
 	if rd.Headers != nil {
-		return rd.Headers[key]
+		h, ok := rd.Headers[strings.ToLower(key)]
+		return h, ok
 	}
-	return ""
+	return "", false
 }
 
 func (rd *RequestDraft) GetQueryParam(key string) string {
@@ -88,7 +89,7 @@ func (rd *RequestDraft) SetHeader(key, val string) *RequestDraft {
 		rd.Headers = make(map[string]string)
 	}
 
-	rd.Headers[key] = val
+	rd.Headers[strings.ToLower(key)] = val
 	return rd
 }
 
