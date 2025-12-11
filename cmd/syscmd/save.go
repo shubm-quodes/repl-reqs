@@ -3,7 +3,6 @@ package syscmd
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
 )
@@ -16,6 +15,7 @@ type CmdSave struct {
 	*BaseReqCmd
 }
 
+// Upserts a new request command
 func (s *CmdSave) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
@@ -24,22 +24,28 @@ func (s *CmdSave) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 		)
 	}
 
-	reqCmd := NewReqCmd(tokens[0], s.Mgr)
-	reqCmd.RequestDraft = s.Mgr.PeakRequestDraft(cmdCtx.ID())
-	reqCmd.PopulateSchemasFromDraft()
+	reqCmd := NewReqCmd(tokens[len(tokens)-1], s.Mgr)
+	draft := s.Mgr.PeakRequestDraft(cmdCtx.ID())
+	if draft == nil {
+		return ctx, errors.New("failed to find a request draft to save/update")
+	}
 
+	reqCmd.RequestDraft = draft
 	hdlr := s.GetCmdHandler()
+	hdlr.Inject(reqCmd)
 
-	reqCmd.register(strings.Join(tokens, " "), hdlr, s.Mgr)
-	if err := UpsertReqCfg(reqCmd); err != nil {
+	if err := UpsertReqCfg(reqCmd, s.Mgr, tokens); err != nil {
 		return ctx, err
 	}
 
-	hdlr.Inject(reqCmd)
-	hdlr.Out(cmdCtx, "request saved successfully")
+	hdlr.Out(cmdCtx, "request saved successfully ✅")
 	return ctx, nil
 }
 
 func (s *CmdSave) AllowInModeWithoutArgs() bool {
 	return false
+}
+
+func (s *CmdSave) GetSuggestions(tokens [][]rune) ([][]rune, int) {
+	return s.SuggestWithoutParams(tokens)
 }

@@ -40,6 +40,8 @@ type Cmd interface {
 
 	GetModeName() string
 
+	GetParent() Cmd
+
 	setHandler(CmdHandler)
 
 	SetParent(Cmd)
@@ -395,10 +397,16 @@ func (h *ReplCmdHandler) ResolveCommandFromRoot(tokens []string) (Cmd, []string)
 	}
 
 	c := h.GetCmdByName(tokens[0])
+	if c == nil {
+		return nil, tokens
+	}
 	return h.ResolveCommand(c, tokens[1:])
 }
 
 func (h *ReplCmdHandler) ResolveCommand(rootCmd Cmd, tokens []string) (Cmd, []string) {
+	if rootCmd == nil {
+		return nil, tokens
+	}
 	subCmds := rootCmd.GetSubCmds()
 
 	if h.GetCurrentModeCmd() != nil {

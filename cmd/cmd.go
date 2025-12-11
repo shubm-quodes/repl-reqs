@@ -127,6 +127,10 @@ func (c *BaseCmd) GetFullyQualifiedName() string {
 	return c.parent.GetFullyQualifiedName() + " " + c.Name()
 }
 
+func (c *BaseCmd) GetParent() Cmd {
+	return c.parent
+}
+
 func (c *BaseCmd) GetSubCmds() SubCmd {
 	return c.SubCmds
 }

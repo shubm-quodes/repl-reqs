@@ -40,15 +40,15 @@ type ReqPropsSchema struct {
 	Body        ValidationSchema `json:"body"`
 }
 
-type BaseReqCmd struct {
-	*cmd.BaseCmd
-	Mgr *network.RequestManager
-}
-
 type ReqCmd struct {
 	*BaseReqCmd
 	*ReqPropsSchema
 	*network.RequestDraft
+}
+
+type ReqCmdCfgBody struct {
+	Type   string                `json:"type"`
+	Schema map[string]Validation `json:"schema"`
 }
 
 type ReqCmdCfg struct {
@@ -57,7 +57,7 @@ type ReqCmdCfg struct {
 	Url          string                `json:"url"`
 	QueryParams  map[string]Validation `json:"queryParams"`
 	UrlParams    map[string]Validation `json:"urlParams"`
-	Body         map[string]Validation `json:"body"`
+	Body         ReqCmdCfgBody         `json:"body"`
 	RequestDraft *network.RequestDraft `json:"requestDraft"`
 }
 
@@ -75,14 +75,6 @@ type PollCondition struct {
 	ExpectedVal string
 }
 
-func NewBaseReqCmd(name string) *BaseReqCmd {
-	return &BaseReqCmd{
-		BaseCmd: &cmd.BaseCmd{
-			Name_: name,
-		},
-	}
-}
-
 func NewReqCmd(name string, mgr *network.RequestManager) *ReqCmd {
 	return &ReqCmd{
 		BaseReqCmd: NewBaseReqCmd(name),
@@ -96,19 +88,28 @@ func NewReqCmd(name string, mgr *network.RequestManager) *ReqCmd {
 }
 
 func NewReqCfgFromCmd(rc *ReqCmd) *ReqCmdCfg {
-	return &ReqCmdCfg{
+	cfg := &ReqCmdCfg{
 		Cmd:          rc.GetFullyQualifiedName(),
 		Url:          rc.Url,
 		HttpMethod:   string(rc.Method),
 		QueryParams:  rc.ReqPropsSchema.QueryParams,
 		UrlParams:    rc.ReqPropsSchema.UrlParams,
-		Body:         rc.ReqPropsSchema.Body,
 		RequestDraft: rc.RequestDraft,
 	}
-}
 
-func (brc *BaseReqCmd) SetReqMgr(mgr *network.RequestManager) {
-	brc.Mgr = mgr
+	schemaType := "text/html"
+	if cType, ok := rc.RequestDraft.Headers["Content-Type"]; ok {
+		if cType == "application/json" {
+			schemaType = "json"
+		}
+		if cType == "application/xml" {
+			schemaType = "xml"
+		}
+	}
+
+	cfg.Body.Type = schemaType
+	cfg.Body.Schema = rc.ReqPropsSchema.Body
+	return cfg
 }
 
 func (rc *ReqCmd) SetUrl(url string) *ReqCmd {
@@ -226,7 +227,10 @@ func processRawReqCfg(
 		if err := json.Unmarshal(req, &reqCmd); err != nil {
 			return err
 		} else {
-			reqCmd.register(reqCmd.Name_, hdlr, rMgr)
+			err := reqCmd.register(reqCmd.Name_, hdlr, rMgr)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -244,14 +248,22 @@ func (rc *ReqCmd) register(
 	cmdWithSubCmds string,
 	hdlr cmd.CmdHandler,
 	rMgr *network.RequestManager,
-) {
+) error {
 	if strings.Trim(cmdWithSubCmds, " ") == "" {
-		panic("cannot register request cmd without a command")
+		return errors.New("cannot register request cmd without a command")
 	}
 
 	var command cmd.AsyncCmd
 	segments := strings.Fields(cmdWithSubCmds)
 	rootCmd := segments[0]
+
+	if strings.HasPrefix(rootCmd, "$") {
+		return fmt.Errorf(
+			"failed to register request command '%s', only system commands can be prefixed with '$'",
+			cmdWithSubCmds,
+		)
+	}
+
 	cmdRegistry := hdlr.GetCmdRegistry()
 	rc.Mgr = rMgr
 
@@ -263,7 +275,7 @@ func (rc *ReqCmd) register(
 		if existingAsyncCmd, ok := existingCmd.(cmd.AsyncCmd); ok {
 			command = existingAsyncCmd
 		} else {
-			panic(fmt.Sprintf("another non async command already registered with name '%s'", rootCmd))
+			return fmt.Errorf("another non async command already registered with name '%s'", rootCmd)
 		}
 	} else {
 		command = NewReqCmd(rootCmd, rMgr)
@@ -285,6 +297,7 @@ func (rc *ReqCmd) register(
 			subCmd, _ = subCmd.GetSubCmds()[string(token)]
 		}
 	}
+	return nil
 }
 
 func (rc *ReqCmd) initializeVlds(
@@ -504,20 +517,6 @@ func (rc *ReqCmd) GetSuggestions(tokens [][]rune) ([][]rune, int) {
 	}
 
 	return rc.suggestParameters(finalCmd, remainingTkns)
-}
-
-func (rc *ReqCmd) getSearchQuery(remainingTkns [][]rune) []rune {
-	if len(remainingTkns) == 0 {
-		return nil
-	}
-
-	lastToken := string(remainingTkns[len(remainingTkns)-1])
-
-	if parts := strings.SplitN(lastToken, "=", 2); len(parts) != 2 {
-		return []rune(lastToken)
-	}
-
-	return nil
 }
 
 func (rc *ReqCmd) SuggestCmdParams(search []rune) (suggestions [][]rune) {
@@ -801,7 +800,53 @@ func upsertRequest(requests []*ReqCmd, rc *ReqCmd) []*ReqCmd {
 	return append(requests, rc)
 }
 
-func UpsertReqCfg(rc *ReqCmd) error {
+func UpsertReqCfg(newReqCmd *ReqCmd, reqMgr *network.RequestManager, commandPath []string) error {
+	// Resolve and update the command in the in-memory tree
+	cmdToSave, err := resolveAndUpdateCommand(newReqCmd, reqMgr, commandPath)
+	if err != nil {
+		return err
+	}
+
+	return persistToConfig(cmdToSave)
+}
+
+func resolveAndUpdateCommand(
+	newReqCmd *ReqCmd,
+	reqMgr *network.RequestManager,
+	commandPath []string,
+) (*ReqCmd, error) {
+	handler := newReqCmd.GetCmdHandler()
+	existingCmd, unusedTokens := handler.ResolveCommandFromRoot(commandPath)
+
+	if existingCmd == nil {
+		newReqCmd.PopulateSchemasFromDraft()
+		newReqCmd.register(strings.Join(commandPath, " "), handler, reqMgr)
+		return newReqCmd, nil
+	}
+
+	existingReqCmd, isReqCmd := existingCmd.(*ReqCmd)
+	if !isReqCmd {
+		return nil, fmt.Errorf(
+			"failed to register request command '%s', conflicts with system command",
+			strings.Join(commandPath, " "),
+		)
+	}
+
+	newReqCmd.PopulateSchemasFromDraft()
+	// Exact match - update existing command in-place and return it
+	if len(unusedTokens) == 0 {
+		newReqCmd.SetParent(existingReqCmd.GetParent())
+		*existingReqCmd = *newReqCmd
+		return existingReqCmd, nil
+	} else {
+		newReqCmd.SetParent(existingCmd)
+	}
+
+	newReqCmd.register(strings.Join(commandPath, " "), handler, reqMgr)
+	return newReqCmd, nil
+}
+
+func persistToConfig(reqCmd *ReqCmd) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -812,14 +857,14 @@ func UpsertReqCfg(rc *ReqCmd) error {
 		return err
 	}
 
-	requests = upsertRequest(requests, rc)
+	requests = upsertRequest(requests, reqCmd)
 
-	if rcmdBytes, err := json.MarshalIndent(requests, "", "  "); err != nil {
+	requestsJSON, err := json.MarshalIndent(requests, "", "  ")
+	if err != nil {
 		return err
-	} else {
-		cfg["requests"] = rcmdBytes
 	}
 
+	cfg["requests"] = requestsJSON
 	return saveConfig(cfg)
 }
 
