@@ -433,7 +433,6 @@ func (rc *ReqCmd) parseExistingBody() (map[string]any, error) {
 	}
 
 	contentType := rc.getContentType()
-	fmt.Println("contenttt:", contentType)
 
 	if strings.Contains(contentType, "application/json") {
 		return rc.parseJSONBody()
