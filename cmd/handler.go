@@ -372,6 +372,10 @@ func (h *ReplCmdHandler) Do(line []rune, pos int) (suggestions [][]rune, offset 
 		return nil, 0
 	}
 
+	if pos == len(trimmed) && offset == 0 && !isLikeAVariable(string(tokens[len(tokens)-1])) {
+		prependSpc(&suggestions) //Ouch! will they ever forgive me?
+	}
+
 	return suggestions, offset
 }
 
@@ -1046,7 +1050,7 @@ func isLikeAVariable(segment string) bool {
 
 func prependSpc(options *[][]rune) {
 	*options = make([][]rune, 1)
-	(*options)[0] = []rune{32}
+	(*options)[0] = []rune{32} // Woopsie
 }
 
 func FormatPrompt(promptTxt, mascot string) string {
