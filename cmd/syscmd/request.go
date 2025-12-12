@@ -566,6 +566,33 @@ func (rc *ReqCmd) isTokenPreExisting(token []rune, remainingTkns [][]rune) bool 
 	return false
 }
 
+func (rc *ReqCmd) splitCmdParamTokens(tokens [][]rune) [][]rune {
+	var uniqueSplitTokens [][]rune
+
+	for _, rTkn := range tokens {
+		s := string(rTkn)
+		idx := strings.Index(s, "=")
+
+		if idx == -1 {
+			uniqueSplitTokens = append(uniqueSplitTokens, rTkn)
+			continue
+		}
+
+		part1Str := s[:idx+1]
+		part2Str := s[idx+1:]
+
+		if part1Str != "" {
+			uniqueSplitTokens = append(uniqueSplitTokens, []rune(part1Str))
+		}
+
+		if part2Str != "" {
+			uniqueSplitTokens = append(uniqueSplitTokens, []rune(part2Str))
+		}
+	}
+
+	return uniqueSplitTokens
+}
+
 func (rc *ReqCmd) filterRedundantTokens(suggestions, remainingTkns [][]rune) [][]rune {
 	var filteredSugg [][]rune
 
@@ -603,7 +630,7 @@ func (rc *ReqCmd) suggestParameters(
 	suggestions = finalCmd.SuggestCmdParams(search)
 
 	if len(suggestions) > 0 && len(remainingTkns) > 0 {
-		suggestions = rc.filterRedundantTokens(suggestions, remainingTkns)
+		suggestions = rc.filterRedundantTokens(suggestions, rc.splitCmdParamTokens(remainingTkns))
 	}
 
 	return
