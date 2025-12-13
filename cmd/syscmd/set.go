@@ -53,7 +53,7 @@ type CmdURL struct {
 }
 
 type CmdHeader struct {
-	*BaseReqCmd
+	*InModeBaseReqCmd
 }
 
 type CmdMultiHeaders struct {
@@ -71,7 +71,7 @@ type CmdBody struct {
 }
 
 type CmdQuery struct {
-	*BaseReqCmd
+	*InModeBaseReqCmd
 }
 
 type CmdPrompt struct {
@@ -295,11 +295,13 @@ func setReqDraftPrompt(hdlr cmd.CmdHandler, draft *network.RequestDraft) {
 
 	if draft.GetMethod() != "" {
 		prompt = fmt.Sprintf(
-			"%s [%s]",
-			prompt,
+			"[%s] %s",
 			color.GreenString(string(draft.GetMethod())),
+			prompt,
 		)
 	}
 
+	config.GetAppCfg().UpdateDefaultPrompt(prompt)
 	hdlr.SetPrompt(prompt, "")
 }
+

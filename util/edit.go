@@ -15,6 +15,8 @@ import (
 type EncoderFunc func(w io.Writer, data any) error
 type DecoderFunc func(data []byte, v any) error
 
+type RawEditWfFunc func(editor string) (rawData []byte, err error)
+
 type EditorConfig struct {
 	// The data struct to be encoded, edited, and decoded back into.
 	// This MUST be a pointer to update the original data.
@@ -23,6 +25,9 @@ type EditorConfig struct {
 	// File parameters
 	FileName string
 	Editor   string
+
+	// Raw bytes "access point", if not nil file content will reflect here
+	RawBytesAp *[]byte
 
 	// Serialization functions
 	Encoder EncoderFunc
@@ -49,7 +54,7 @@ func OpenFileInEditor(file *os.File, editor string) error {
 	return cmd.Run()
 }
 
-func setupTempFile(cfg EditorConfig) (*os.File, error) {
+func setupTempFile(cfg *EditorConfig) (*os.File, error) {
 	file, err := NewTempFile(cfg.FileName)
 	if err != nil {
 		return nil, err
@@ -63,7 +68,7 @@ func setupTempFile(cfg EditorConfig) (*os.File, error) {
 	return file, nil
 }
 
-func openEditor(file *os.File, cfg EditorConfig) error {
+func openEditor(file *os.File, cfg *EditorConfig) error {
 	// Use cfg.Editor
 	if err := OpenFileInEditor(file, cfg.Editor); err != nil {
 		return fmt.Errorf("external editor failed: %w", err)
@@ -71,7 +76,7 @@ func openEditor(file *os.File, cfg EditorConfig) error {
 	return nil
 }
 
-func readBackAndDecode(file *os.File, cfg EditorConfig) error {
+func readBackAndDecode(file *os.File, cfg *EditorConfig) error {
 	filePath := file.Name()
 
 	if err := file.Close(); err != nil {
@@ -85,14 +90,23 @@ func readBackAndDecode(file *os.File, cfg EditorConfig) error {
 	defer rereadFile.Close()
 
 	modifiedBytes, err := io.ReadAll(rereadFile)
+
 	if err != nil {
 		return fmt.Errorf("failed to read modified file: %w", err)
 	}
 
-	return cfg.Decoder(modifiedBytes, cfg.TargetDataStructure)
+	if cfg.RawBytesAp != nil {
+		*cfg.RawBytesAp = modifiedBytes
+	}
+
+	if cfg.TargetDataStructure != nil {
+		return cfg.Decoder(modifiedBytes, cfg.TargetDataStructure)
+	}
+
+	return nil
 }
 
-func EditorWorkflow(cfg EditorConfig) error {
+func EditorWorkflow(cfg *EditorConfig) error {
 	file, err := setupTempFile(cfg)
 	if err != nil {
 		return err
@@ -142,7 +156,7 @@ func TomlDecoder(data []byte, v any) error {
 }
 
 func EditToml(data any, editor string) error {
-	cfg := EditorConfig{
+	cfg := &EditorConfig{
 		TargetDataStructure: data,
 		FileName:            "reql-reqs.req.toml",
 		Editor:              editor,
@@ -154,7 +168,7 @@ func EditToml(data any, editor string) error {
 }
 
 func EditJSON(data any, editor string) error {
-	cfg := EditorConfig{
+	cfg := &EditorConfig{
 		TargetDataStructure: data,
 		FileName:            "reql-reqs.payload.json",
 		Editor:              editor,
@@ -166,7 +180,7 @@ func EditJSON(data any, editor string) error {
 }
 
 func EditXML(data any, editor string) error {
-	cfg := EditorConfig{
+	cfg := &EditorConfig{
 		TargetDataStructure: data,
 		FileName:            "reql-reqs.payload.xml",
 		Editor:              editor,
@@ -175,4 +189,33 @@ func EditXML(data any, editor string) error {
 	}
 
 	return EditorWorkflow(cfg)
+}
+
+// The json will not be decoded into a target ds, instead raw bytes will be returned.
+func EditJsonRawWf(editor string) ([]byte, error) {
+	var rawBytes []byte
+	cfg := &EditorConfig{
+		TargetDataStructure: nil,
+		FileName:            "reql-reqs.payload.json",
+		Editor:              editor,
+		Encoder:             JsonEncoder,
+		Decoder:             JsonDecoder,
+		RawBytesAp:          &rawBytes,
+	}
+
+	return rawBytes, EditorWorkflow(cfg)
+}
+
+func EditXMLRawWf(editor string) ([]byte, error) {
+	var rawBytes []byte
+	cfg := &EditorConfig{
+		TargetDataStructure: nil,
+		FileName:            "reql-reqs.payload.xml",
+		Editor:              editor,
+		Encoder:             XmlEncoder,
+		Decoder:             XmlDecoder,
+		RawBytesAp:          &rawBytes,
+	}
+
+	return rawBytes, EditorWorkflow(cfg)
 }

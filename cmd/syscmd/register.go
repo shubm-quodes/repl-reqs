@@ -7,13 +7,13 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 	s.AddSubCmd(&CmdEnv{cmd.NewBaseCmd(CmdEnvName, "")}).
 		AddSubCmd(&CmdVar{cmd.NewBaseCmd(CmdVarName, "")}).
 		AddSubCmd(&CmdURL{NewBaseReqCmd(CmdURLName)}).
-		AddSubCmd(&CmdHeader{NewBaseReqCmd(CmdHeaderName)}).
+		AddSubCmd(&CmdHeader{NewInModeBaseReqCmd(CmdHeaderName)}).
 		AddSubCmd(&CmdMultiHeaders{BaseReqCmd: NewBaseReqCmd(CmdMultiHeadersName)}).
 		AddSubCmd(&CmdMethod{NewBaseReqCmd(CmdMethodName)}).
 		AddSubCmd(&CmdBody{NewBaseReqCmd(CmdBodyName)}).
 		AddSubCmd(&CmdPrompt{cmd.NewBaseCmd(CmdPromptName, "")}).
 		AddSubCmd(&CmdMascot{cmd.NewBaseCmd(CmdMascotName, "")}).
-		AddSubCmd(&CmdQuery{NewBaseReqCmd(CmdQueryName)})
+		AddSubCmd(&CmdQuery{NewInModeBaseReqCmd(CmdQueryName)})
 
 	n := &draftReqCmd{NewBaseReqCmd(CmdDraftReqName)}
 
@@ -32,7 +32,9 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 
 	edit := &CmdEdit{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditName, "")}}
 	edit.AddSubCmd(&CmdEditReq{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditReqName, "")}}).
-		AddSubCmd(&CmdEditRespBody{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditRespBodyName, "")}})
+		AddSubCmd(&CmdEditRespBody{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditRespBodyName, "")}}).
+		AddSubCmd(&CmdEditJSON{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditJsonName, "")}}).
+		AddSubCmd(&CmdEditXml{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditXmlName, "")}})
 
 	reg.RegisterCmd(s, n, send, ls, save, dlt, edit)
 }

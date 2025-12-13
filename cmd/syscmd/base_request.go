@@ -12,10 +12,24 @@ type BaseReqCmd struct {
 	Mgr *network.RequestManager
 }
 
+type InModeBaseReqCmd struct {
+	*BaseReqCmd
+}
+
 func NewBaseReqCmd(name string) *BaseReqCmd {
 	return &BaseReqCmd{
 		BaseCmd: &cmd.BaseCmd{
 			Name_: name,
+		},
+	}
+}
+
+func NewInModeBaseReqCmd(name string) *InModeBaseReqCmd {
+	return &InModeBaseReqCmd{
+		&BaseReqCmd{
+			BaseCmd: &cmd.BaseCmd{
+				Name_: name,
+			},
 		},
 	}
 }
@@ -91,4 +105,8 @@ func (rc *BaseReqCmd) getSearchQuery(remainingTkns [][]rune) []rune {
 
 func (rc *BaseReqCmd) AllowInModeWithoutArgs() bool {
 	return false
+}
+
+func (rc *InModeBaseReqCmd) AllowInModeWithoutArgs() bool {
+	return true
 }

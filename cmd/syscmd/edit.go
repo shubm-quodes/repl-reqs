@@ -21,6 +21,8 @@ const (
 
 	// Sub commands
 	CmdEditReqName      = "request"
+	CmdEditJsonName     = "json"
+	CmdEditXmlName      = "xml"
 	CmdEditRespBodyName = "response_body"
 	CmdEditSeqName      = "sequence"
 )
@@ -30,6 +32,14 @@ type CmdEdit struct {
 }
 
 type CmdEditReq struct {
+	*BaseReqCmd
+}
+
+type CmdEditJSON struct {
+	*BaseReqCmd
+}
+
+type CmdEditXml struct {
 	*BaseReqCmd
 }
 
@@ -72,7 +82,9 @@ func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	return ctx, rd.EditAsToml()
 }
 
-func (er *CmdEditRespBody) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+func (er *CmdEditRespBody) Execute(
+	cmdCtx *cmd.CmdCtx,
+) (context.Context, error) {
 	trackerReq, err := er.Mgr.PeakTrackerRequest(cmdCtx.ID())
 
 	if err != nil {
@@ -91,13 +103,20 @@ func (er *CmdEditRespBody) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) 
 func (er *CmdEditRespBody) OpenEditor(req *network.TrackerRequest) error {
 	contentType, ok := req.ResponseHeaders["Content-Type"]
 	if !ok {
-		return errors.New("content type header no found, failed to infer editor for response body")
+		return errors.New(
+			"'content-type' header no found, failed to infer editor for response body",
+		)
 	}
 
 	respBytes, err := util.ReadAndResetIoCloser(&req.ResponseBody)
 	if err != nil {
-		log.Debug("failed to process response body for the last request: %w", err.Error())
-		return errors.New("failed to process response body for the last request")
+		log.Debug(
+			"failed to process response body for the last request: %w",
+			err.Error(),
+		)
+		return errors.New(
+			"failed to process response body for the last request",
+		)
 	}
 
 	var respBody any
@@ -117,6 +136,26 @@ func (er *CmdEditRespBody) OpenEditor(req *network.TrackerRequest) error {
 	return util.EditXML(&respBody, config.GetAppCfg().GetDefaultEditor())
 }
 
+func (ej *CmdEditJSON) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	draft := ej.Mgr.PeakRequestDraft(cmdCtx.ID())
+	if draft == nil {
+		return cmdCtx.Ctx, errors.New("cannot edit json, no request drafts")
+	}
+
+	draft.SetHeader("content-type", "application/json")
+	return rawWfEdit(ej.BaseReqCmd, cmdCtx, util.EditJsonRawWf)
+}
+
+func (ex *CmdEditXml) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	draft := ex.Mgr.PeakRequestDraft(cmdCtx.ID())
+	if draft == nil {
+		return cmdCtx.Ctx, errors.New("cannot edit xml, no request drafts")
+	}
+
+	draft.SetHeader("content-type", "application/xml")
+	return rawWfEdit(ex.BaseReqCmd, cmdCtx, util.EditXMLRawWf)
+}
+
 func (er *CmdEditReq) GetSuggestions(tokens [][]rune) ([][]rune, int) {
 	return er.SuggestWithoutParams(tokens)
 }
@@ -127,4 +166,26 @@ func (er *CmdEditReq) AllowInModeWithoutArgs() bool {
 
 func (er *CmdEditRespBody) AllowInModeWithoutArgs() bool {
 	return false
+}
+
+func rawWfEdit(
+	br *BaseReqCmd,
+	cmdCtx *cmd.CmdCtx,
+	fn util.RawEditWfFunc,
+) (context.Context, error) {
+	draft := br.Mgr.PeakRequestDraft(cmdCtx.ID())
+	if draft == nil {
+		return cmdCtx.Ctx, errors.New(
+			"cannot edit json body, no request drafts",
+		)
+	}
+
+	rawData, err := fn(config.GetAppCfg().GetDefaultEditor())
+	if err != nil {
+		return cmdCtx.Ctx, err
+	}
+
+	draft.Body = string(rawData)
+
+	return cmdCtx.Ctx, nil
 }

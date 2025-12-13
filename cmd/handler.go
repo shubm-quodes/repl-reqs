@@ -888,7 +888,6 @@ func (h *ReplCmdHandler) repl() {
 	}
 
 	h.SetPrompt(h.appCfg.GetPrompt(), h.appCfg.GetPromptMascot())
-	h.SuppressStdOut()
 	go h.listenForTaskUpdates()
 	for {
 		line, err := h.rl.Readline()
@@ -938,25 +937,6 @@ func (h *ReplCmdHandler) activateListeners() {
 		}
 		rlCfg.KeyListeners[lsnr.key] = lsnr.handler
 	}
-}
-
-func (h *ReplCmdHandler) SuppressStdOut() {
-	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
-	if err != nil {
-		panic("Failed to open /dev/tty: " + err.Error())
-	}
-	h.tty = tty
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		panic("Pipe failed: " + err.Error())
-	}
-
-	os.Stdout = w
-
-	go func() {
-		io.Copy(io.Discard, r)
-	}()
 }
 
 func (h *ReplCmdHandler) printf(formatStr string, a ...any) {
