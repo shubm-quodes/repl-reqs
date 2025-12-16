@@ -15,7 +15,7 @@ import (
 type EncoderFunc func(w io.Writer, data any) error
 type DecoderFunc func(data []byte, v any) error
 
-type RawEditWfFunc func(editor string) (rawData []byte, err error)
+type RawEditWfFunc func(editor string, data any) (rawData []byte, err error)
 
 type EditorConfig struct {
 	// The data struct to be encoded, edited, and decoded back into.
@@ -192,30 +192,53 @@ func EditXML(data any, editor string) error {
 }
 
 // The json will not be decoded into a target ds, instead raw bytes will be returned.
-func EditJsonRawWf(editor string) ([]byte, error) {
+func EditJsonRawWf(editor string, data any) ([]byte, error) {
 	var rawBytes []byte
 	cfg := &EditorConfig{
-		TargetDataStructure: nil,
+		TargetDataStructure: data,
 		FileName:            "reql-reqs.payload.json",
 		Editor:              editor,
-		Encoder:             JsonEncoder,
-		Decoder:             JsonDecoder,
+		Encoder:             RawEncoder, // Use RawEncoder to avoid "null" or quotes
+		Decoder:             RawDecoder, // No-op decoder
 		RawBytesAp:          &rawBytes,
 	}
 
-	return rawBytes, EditorWorkflow(cfg)
+	err := EditorWorkflow(cfg)
+	return rawBytes, err
 }
 
-func EditXMLRawWf(editor string) ([]byte, error) {
+func EditXMLRawWf(editor string, data any) ([]byte, error) {
 	var rawBytes []byte
 	cfg := &EditorConfig{
-		TargetDataStructure: nil,
+		TargetDataStructure: data,
 		FileName:            "reql-reqs.payload.xml",
 		Editor:              editor,
-		Encoder:             XmlEncoder,
-		Decoder:             XmlDecoder,
+		Encoder:             RawEncoder,
+		Decoder:             RawDecoder,
 		RawBytesAp:          &rawBytes,
 	}
 
-	return rawBytes, EditorWorkflow(cfg)
+	err := EditorWorkflow(cfg)
+	return rawBytes, err
+}
+
+func RawEncoder(w io.Writer, data any) error {
+	if data == nil {
+		return nil // File stays empty for the user to start fresh
+	}
+	switch v := data.(type) {
+	case []byte:
+		_, err := w.Write(v)
+		return err
+	case string:
+		_, err := io.WriteString(w, v)
+		return err
+	default:
+		// Fallback for safety
+		return fmt.Errorf("RawEncoder expects []byte or string, got %T", data)
+	}
+}
+
+func RawDecoder(data []byte, v any) error {
+	return nil
 }

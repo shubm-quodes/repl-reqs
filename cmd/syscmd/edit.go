@@ -180,7 +180,7 @@ func rawWfEdit(
 		)
 	}
 
-	rawData, err := fn(config.GetAppCfg().GetDefaultEditor())
+	rawData, err := fn(config.GetAppCfg().GetDefaultEditor(), draft.Body)
 	if err != nil {
 		return cmdCtx.Ctx, err
 	}
