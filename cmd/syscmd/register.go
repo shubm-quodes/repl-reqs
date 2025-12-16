@@ -36,5 +36,7 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 		AddSubCmd(&CmdEditJSON{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditJsonName, "")}}).
 		AddSubCmd(&CmdEditXml{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditXmlName, "")}})
 
-	reg.RegisterCmd(s, n, send, ls, save, dlt, edit)
+	p := &CmdPoll{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdPollName, "")}}
+
+	reg.RegisterCmd(s, n, send, ls, save, dlt, edit, p)
 }

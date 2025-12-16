@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -71,14 +72,65 @@ func ReplaceStrPattern(input, pattern string, lookups map[string]string) (string
 	return result, nil
 }
 
+// Finds the first match in an array and returns it, else reports with an error
+func FindMatchingVal(arr []any, key string) (any, error) {
+	for _, item := range arr {
+		if obj, ok := item.(map[string]any); ok {
+			if val, exists := obj[key]; exists {
+				return val, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("none of the array elements contain '%s'", key)
+}
+
+// Returns all matching elements in an array, else if no element is found reports with an error
+func FindAllMatchingVals(arr []any, key string) ([]any, error) {
+	var results []any
+	for _, item := range arr {
+		if obj, ok := item.(map[string]any); ok {
+			if val, exists := obj[key]; exists {
+				results = append(results, val)
+			}
+		}
+	}
+
+	return results, fmt.Errorf("none of the array elements contain '%s'", key)
+}
+
+func findInMap[V any](data map[string]V, key string) (any, error) {
+	if val, ok := data[key]; ok {
+		// val (of type V) is implicitly converted to any upon return
+		return val, nil
+	}
+	return nil, fmt.Errorf("key '%s' not found in object", key)
+}
+
 func NavigateToKey(data any, key string) (any, error) {
 	switch v := data.(type) {
+	// 1. The primary, most flexible case (map[string]any)
 	case map[string]any:
-		if val, ok := v[key]; ok {
-			return val, nil
-		}
-		return nil, fmt.Errorf("key '%s' not found in object", key)
+		return findInMap(v, key)
 
+	// 2. Cases for common, non-any value maps
+	// Yeah yeah.. I will NOT use reflection, there's no point in trying to convince me.
+	case map[string]bool:
+		return findInMap(v, key)
+	case map[string]int:
+		return findInMap(v, key)
+	case map[string]int32:
+		return findInMap(v, key)
+	case map[string]int64:
+		return findInMap(v, key)
+	case map[string]float32:
+		return findInMap(v, key)
+	case map[string]float64:
+		return findInMap(v, key)
+	case map[string]string:
+		return findInMap(v, key)
+
+	// 3. Array/Slice Navigation
 	case []any:
 		if idx, err := strconv.Atoi(key); err == nil {
 			if idx < 0 || idx >= len(v) {
@@ -92,25 +144,35 @@ func NavigateToKey(data any, key string) (any, error) {
 			return v, nil
 		}
 
-		// If key is not an index or wildcard, try to collect the key from all array elements
-		// This handles cases like: array is at current level, but we want a property from each element
-		var results []any
-		for _, item := range v {
-			if obj, ok := item.(map[string]any); ok {
-				if val, exists := obj[key]; exists {
-					results = append(results, val)
-				}
-			}
-		}
-
-		if len(results) == 0 {
-			return nil, fmt.Errorf("key '%s' not found in any array element", key)
-		}
-
-		// If all results are the same type and simple values, return them
-		return results, nil
+		// If key is not an index or wildcard, attempt to find it in array
+		return FindMatchingVal(v, key)
 
 	default:
 		return nil, fmt.Errorf("cannot navigate from type %T with key '%s'", data, key)
 	}
+}
+
+// Takes a string pattern to find a value in an array/map[string]any
+// In case of arrays first matching val will be returned
+func ExtractVal(ds any, pattern string) (any, error) {
+	pattern = strings.Trim(pattern, " ")
+	if pattern == "" {
+		return nil, errors.New("failed to determine val as the pattern is empty")
+	}
+
+	var (
+		parts []string
+		val   any = ds
+		err   error
+	)
+
+	parts = strings.Split(pattern, ".")
+	for _, p := range parts {
+		val, err = NavigateToKey(val, p)
+		if err != nil {
+			break
+		}
+	}
+
+	return val, err
 }

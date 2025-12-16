@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"maps"
@@ -241,33 +242,32 @@ func GetMapVal(keySequence []string, m map[string]any) any {
 	return nil
 }
 
-func CompareStrWithAny(val1 string, val2 any) bool {
+// Use this to compare string cmd line args with interface{}
+// This would be sufficient for basic types
+func IsStrEqualToAny(strVal string, val2 any) bool {
+	if val2 == nil {
+		return strVal == "" || strVal == "null" || strVal == "nil"
+	}
+
 	switch v := val2.(type) {
 	case string:
-		return CompareTypeWithAny(val1, v)
-	case int:
-		intVal, err := strconv.Atoi(val1)
+		return strVal == v
+	case bool:
+		return strVal == strconv.FormatBool(v)
+	case int, int8, int16, int32, int64:
+		return strVal == fmt.Sprintf("%d", v)
+	case float32, float64:
+		floatVal, err := strconv.ParseFloat(strVal, 64)
 		if err != nil {
 			return false
 		}
-		return CompareTypeWithAny(intVal, v)
-	case float64:
-		floatVal, err := strconv.ParseFloat(val1, 64)
-		if err != nil {
-			return false
-		}
-		return CompareTypeWithAny(floatVal, v)
-	case nil:
-		if val1 == "nil" {
-			return true
-		}
-		return false
-	case []any:
-		CheckArrElem(val1, v)
+		return fmt.Sprintf("%g", floatVal) == fmt.Sprintf("%g", v)
+	case []byte:
+		return strVal == string(v)
 	default:
-		return CompareTypeWithAny(v, val2)
+		// Fallback for pointers or custom types
+		return strVal == fmt.Sprintf("%v", v)
 	}
-	return false
 }
 
 func CompareTypeWithAny[T comparable](val1 T, val2 T) bool {
