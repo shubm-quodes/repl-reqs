@@ -10,6 +10,8 @@ require github.com/BurntSushi/toml v1.5.0
 
 require github.com/shubm-quodes/readline v1.5.3
 
+require github.com/atotto/clipboard v0.1.4
+
 require (
 	github.com/alecthomas/chroma v0.10.0
 	github.com/briandowns/spinner v1.23.2

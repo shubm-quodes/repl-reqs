@@ -38,5 +38,9 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 
 	p := &CmdPoll{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdPollName, "")}}
 
-	reg.RegisterCmd(s, n, send, ls, save, dlt, edit, p)
+	cp := &CmdCopy{BaseCmd: cmd.NewBaseCmd(CmdCopyName, "")}
+	cp.AddSubCmd(
+		&CmdCopyRespBody{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdCopyResponseBodyName, "")}},
+	)
+	reg.RegisterCmd(s, n, send, ls, save, dlt, edit, p, cp)
 }
