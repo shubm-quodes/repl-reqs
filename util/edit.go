@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -224,19 +225,56 @@ func EditXMLRawWf(editor string, data any) ([]byte, error) {
 
 func RawEncoder(w io.Writer, data any) error {
 	if data == nil {
-		return nil // File stays empty for the user to start fresh
+		return nil
 	}
+
+	var raw []byte
+
 	switch v := data.(type) {
 	case []byte:
-		_, err := w.Write(v)
-		return err
+		raw = v
 	case string:
-		_, err := io.WriteString(w, v)
-		return err
+		raw = []byte(v)
 	default:
-		// Fallback for safety
 		return fmt.Errorf("RawEncoder expects []byte or string, got %T", data)
 	}
+
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		_, err := w.Write(raw)
+		return err
+	}
+
+	firstChar := trimmed[0]
+
+	if firstChar == '{' || firstChar == '[' {
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, raw, "", "  "); err == nil {
+			_, err = w.Write(buf.Bytes())
+			return err
+		}
+	} else if firstChar == '<' {
+		var buf bytes.Buffer
+		decoder := xml.NewDecoder(bytes.NewReader(raw))
+		encoder := xml.NewEncoder(&buf)
+		encoder.Indent("", "  ")
+
+		for {
+			token, err := decoder.Token()
+			if err == io.EOF { break }
+			if err != nil { break } // Fallback handled below
+			encoder.EncodeToken(token)
+		}
+		encoder.Flush()
+		if buf.Len() > 0 {
+			_, err := w.Write(buf.Bytes())
+			return err
+		}
+	}
+
+	// Fallback: Write original bytes if not JSON/XML or if formatting failed
+	_, err := w.Write(raw)
+	return err
 }
 
 func RawDecoder(data []byte, v any) error {
