@@ -27,6 +27,7 @@ type TrackerRequest struct {
 	StatusCode      int
 	ResponseHeaders http.Header
 	ResponseBody    io.ReadCloser
+	FullResponse    *http.Response
 	Done            Done
 	RequestTime     time.Duration
 }
@@ -67,6 +68,7 @@ func (rt *RequestTracker) startListener() {
 		if update.resp != nil {
 			trackerReq.ResponseHeaders = update.resp.Header
 			trackerReq.StatusCode = update.resp.StatusCode
+			trackerReq.FullResponse = update.resp
 		}
 
 		trackerReq.Status = StatusCompleted

@@ -32,6 +32,7 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 
 	edit := &CmdEdit{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditName, "")}}
 	edit.AddSubCmd(&CmdEditReq{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditReqName, "")}}).
+		AddSubCmd(&CmdEditResp{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditResponseName, "")}}).
 		AddSubCmd(&CmdEditRespBody{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditRespBodyName, "")}}).
 		AddSubCmd(&CmdEditJSON{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditJsonName, "")}}).
 		AddSubCmd(&CmdEditXml{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdEditXmlName, "")}})

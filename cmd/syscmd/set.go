@@ -245,6 +245,16 @@ func (ce *CmdEnv) GetSuggestions(tokens [][]rune) ([][]rune, int) {
 	return util.StrArrToRune(matches), len(search)
 }
 
+func (cv *CmdVar) GetSuggestions(tokens [][]rune) ([][]rune, int) {
+	var search string
+	if len(tokens) > 0 {
+		search = string(tokens[0])
+	}
+
+	envMgr := config.GetEnvManager()
+	return envMgr.GetMatchingVars(search), len(search)
+}
+
 func (pc *CmdPrompt) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	tokens, ctx := cmdCtx.ExpandedTokens, cmdCtx.Ctx
 	if len(tokens) == 0 {
@@ -304,4 +314,3 @@ func setReqDraftPrompt(hdlr cmd.CmdHandler, draft *network.RequestDraft) {
 	config.GetAppCfg().UpdateDefaultPrompt(prompt)
 	hdlr.SetPrompt(prompt, "")
 }
-

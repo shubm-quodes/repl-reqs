@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -273,14 +274,16 @@ func ToIndentedPayload(data any) ([]byte, error) {
 		decoder := xml.NewDecoder(bytes.NewReader(raw))
 		encoder := xml.NewEncoder(&buf)
 		encoder.Indent("", "  ")
-		
+
 		validXML := true
 		for {
 			token, err := decoder.Token()
-			if err == io.EOF { break }
-			if err != nil { 
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
 				validXML = false
-				break 
+				break
 			}
 			encoder.EncodeToken(token)
 		}
@@ -305,4 +308,48 @@ func RawEncoder(w io.Writer, data any) error {
 
 func RawDecoder(data []byte, v any) error {
 	return nil
+}
+
+type ResponseData struct {
+	Status     string              `toml:"status"`
+	StatusCode int                 `toml:"status_code"`
+	Proto      string              `toml:"protocol"`
+	Headers    map[string][]string `toml:"headers"`
+	Body       string              `toml:"body"`
+}
+
+func EditResponseInToml(resp *http.Response, editor string) (*ResponseData, error) {
+	if resp == nil {
+		return nil, fmt.Errorf("no response to edit")
+	}
+
+	bodyBytes, err := ReadAndResetIoCloser(&resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read body: %w", err)
+	}
+	resp.Body.Close()
+
+	indentedBody, _ := ToIndentedPayload(bodyBytes)
+
+	data := &ResponseData{
+		Status:     resp.Status,
+		StatusCode: resp.StatusCode,
+		Proto:      resp.Proto,
+		Headers:    resp.Header,
+		Body:       string(indentedBody),
+	}
+
+	cfg := &EditorConfig{
+		TargetDataStructure: data,
+		FileName:            "http-response.toml",
+		Editor:              editor,
+		Encoder:             TomlEncoder,
+		Decoder:             TomlDecoder,
+	}
+
+	if err := EditorWorkflow(cfg); err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }

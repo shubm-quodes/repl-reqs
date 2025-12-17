@@ -50,26 +50,61 @@ func surroundStr(str, prefix, suffix string) string {
 	return prefix + str + suffix
 }
 
-// Var pattern - `{{(.*?)}}`
+/*
+* Var pattern - `{{(.*?)}}`
+* Recursively replaces variables upto any level of nesting, but returns an error in case of circular dependencies between vars
+ */
 func ReplaceStrPattern(input, pattern string, lookups map[string]string) (string, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return "", err
 	}
-	matches := re.FindAllStringSubmatch(input, -1)
 
-	if len(matches) == 0 {
-		return input, nil
-	}
+	// visited tracks the variables currently being resolved in the current "branch"
+	// to detect circular references.
+	visited := make(map[string]bool)
 
-	result := input
-	for _, match := range matches {
-		varName := strings.TrimSpace(match[1])
-		if value, ok := lookups[varName]; ok {
-			result = strings.ReplaceAll(result, match[0], value)
+	var resolve func(string) (string, error)
+	resolve = func(current string) (string, error) {
+		// Find all matches in the current string
+		matches := re.FindAllStringSubmatch(current, -1)
+		if len(matches) == 0 {
+			return current, nil
 		}
+
+		result := current
+		for _, match := range matches {
+			fullMatch := match[0]
+			varName := strings.TrimSpace(match[1])
+
+			if val, ok := lookups[varName]; ok {
+				// CYCLE DETECTION:
+				if visited[varName] {
+					return "", fmt.Errorf(
+						"circular dependency detected, failed to expand variable: %s",
+						varName,
+					)
+				}
+
+				// Mark as visited before diving deeper
+				visited[varName] = true
+
+				// Recursively resolve the value of the variable
+				resolvedVal, err := resolve(val)
+				if err != nil {
+					return "", err
+				}
+
+				// Unmark (backtrack) so other branches can use this variable
+				delete(visited, varName)
+
+				result = strings.ReplaceAll(result, fullMatch, resolvedVal)
+			}
+		}
+		return result, nil
 	}
-	return result, nil
+
+	return resolve(input)
 }
 
 // Finds the first match in an array and returns it, else reports with an error

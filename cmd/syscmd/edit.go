@@ -23,6 +23,7 @@ const (
 	CmdEditReqName      = "request"
 	CmdEditJsonName     = "json"
 	CmdEditXmlName      = "xml"
+	CmdEditResponseName = "response"
 	CmdEditRespBodyName = "response_body"
 	CmdEditSeqName      = "sequence"
 )
@@ -40,6 +41,10 @@ type CmdEditJSON struct {
 }
 
 type CmdEditXml struct {
+	*BaseReqCmd
+}
+
+type CmdEditResp struct {
 	*BaseReqCmd
 }
 
@@ -80,6 +85,29 @@ func (er *CmdEditReq) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 		er.Mgr.AddDraftRequest(cmdCtx.ID(), rd)
 	}
 	return ctx, rd.EditAsToml()
+}
+
+func (er *CmdEditResp) Execute(
+	cmdCtx *cmd.CmdCtx,
+) (context.Context, error) {
+	trackerReq, err := er.Mgr.PeakTrackerRequest(cmdCtx.ID())
+
+	if err != nil {
+		return cmdCtx.Ctx, err
+	}
+
+	if trackerReq.FullResponse == nil {
+		return cmdCtx.Ctx, errors.New(
+			"request still seems to be in progress, you could track it's status using $ls tasks cmd",
+		)
+	}
+
+	_, err = util.EditResponseInToml(
+		trackerReq.FullResponse,
+		config.GetAppCfg().GetDefaultEditor(),
+	)
+
+	return cmdCtx.Ctx, err
 }
 
 func (er *CmdEditRespBody) Execute(
