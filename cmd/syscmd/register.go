@@ -8,6 +8,7 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 		AddSubCmd(&CmdVar{cmd.NewBaseCmd(CmdVarName, "")}).
 		AddSubCmd(&CmdURL{NewBaseReqCmd(CmdURLName)}).
 		AddSubCmd(&CmdHeader{NewInModeBaseReqCmd(CmdHeaderName)}).
+		AddSubCmd(&CmdCookie{NewInModeBaseReqCmd(CmdCookieName)}).
 		AddSubCmd(&CmdMultiHeaders{BaseReqCmd: NewBaseReqCmd(CmdMultiHeadersName)}).
 		AddSubCmd(&CmdMethod{NewBaseReqCmd(CmdMethodName)}).
 		AddSubCmd(&CmdBody{NewBaseReqCmd(CmdBodyName)}).
@@ -43,5 +44,12 @@ func RegisterCmds(reg *cmd.CmdRegistry) {
 	cp.AddSubCmd(
 		&CmdCopyRespBody{&BaseReqCmd{BaseCmd: cmd.NewBaseCmd(CmdCopyResponseBodyName, "")}},
 	)
-	reg.RegisterCmd(s, n, send, ls, save, dlt, edit, p, cp)
+
+	peak := &CmdPeak{cmd.NewBaseNonModeCmd(CmdPeakName, "")}
+	peak.AddSubCmd(&CmdPeakVar{cmd.NewBaseNonModeCmd(CmdPeakVarName, "")})
+
+	exp := &CmdExpand{cmd.NewBaseNonModeCmd(CmdExpandName, "")}
+	exp.AddSubCmd(&CmdExpandVar{cmd.NewBaseNonModeCmd(CmdExpandVarName, "")})
+
+	reg.RegisterCmd(s, n, send, ls, save, dlt, edit, p, cp, peak, exp)
 }

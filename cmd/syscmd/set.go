@@ -29,6 +29,7 @@ const (
 	CmdURLName          = "url"
 	CmdQueryName        = "query"
 	CmdHeaderName       = "header"
+	CmdCookieName       = "cookie"
 	CmdMultiHeadersName = "multi-headers"
 	CmdMethodName       = "method"
 	CmdBodyName         = "body"
@@ -60,6 +61,10 @@ type CmdMultiHeaders struct {
 	*BaseReqCmd
 	req *http.Request
 	mu  *sync.Mutex
+}
+
+type CmdCookie struct {
+	*InModeBaseReqCmd
 }
 
 type CmdMethod struct {
@@ -105,6 +110,26 @@ func (ch *CmdHeader) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 	}
 
 	reqDraft.SetHeader(key, val)
+	return ctx, nil
+}
+
+func (ch *CmdCookie) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
+	ctx, tokens := cmdCtx.Ctx, cmdCtx.RawTokens
+	if len(tokens) < 2 {
+		return ctx, errors.New("please provide cookie [key] [val]")
+	}
+
+	key, val := tokens[0], tokens[1]
+	reqDraft := ch.Mgr.PeakRequestDraft(cmdCtx.ID())
+
+	if reqDraft == nil {
+		return ctx, fmt.Errorf(
+			"no drafts, start drafting requests using %s command",
+			CmdDraftReqName,
+		)
+	}
+
+	reqDraft.SetCookie(key, val)
 	return ctx, nil
 }
 

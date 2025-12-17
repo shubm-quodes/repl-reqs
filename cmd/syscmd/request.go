@@ -380,6 +380,14 @@ func (rc *ReqCmd) getCmdParams(tokens []string) (*CmdParams, error) {
 	return cmdParams, nil
 }
 
+func (rc *ReqCmd) substituteVars(input string) (string, error) {
+	return util.ReplaceStrPattern(
+		input,
+		config.VarPattern,
+		config.GetEnvManager().GetActiveEnvVars(),
+	)
+}
+
 func (rc *ReqCmd) processStringParams(parsedParams map[string]string, schema map[string]Validation,
 	dest map[string]string, fallback map[string]string, paramType string) error {
 
@@ -392,6 +400,10 @@ func (rc *ReqCmd) processStringParams(parsedParams map[string]string, schema map
 				}
 			}
 			continue
+		}
+		value, err := rc.substituteVars(value)
+		if err != nil {
+			return fmt.Errorf("variable substitution failed to '%s'", value)
 		}
 		validatedValue, err := valSchema.validate(value)
 		if err != nil {
@@ -417,6 +429,14 @@ func (rc *ReqCmd) processBodyParams(parsedParams map[string]string, cmdParams *C
 			}
 			continue
 		}
+		value, err = rc.substituteVars(value)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to substitute boy variable for command param '%s': %s",
+				key,
+				err.Error(),
+			)
+		}
 		validatedValue, err := valSchema.validate(value)
 		if err != nil {
 			return fmt.Errorf("validation failed for body parameter '%s': %w", key, err)
@@ -434,31 +454,36 @@ func (rc *ReqCmd) parseExistingBody() (map[string]any, error) {
 
 	contentType := rc.getContentType()
 
+	body, err := rc.substituteVars(rc.RequestDraft.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to substitute vars for body: %s", err.Error())
+	}
+
 	if strings.Contains(contentType, "application/json") {
-		return rc.parseJSONBody()
+		return rc.parseJSONBody(body)
 	}
 	if strings.Contains(contentType, "xml") {
-		return rc.parseXMLBody()
+		return rc.parseXMLBody(body)
 	}
 	if strings.Contains(contentType, "text/") {
-		return rc.parseTextBody()
+		return rc.parseTextBody(body)
 	}
 
 	// Fallback to JSON
 	result := make(map[string]any)
-	_ = json.Unmarshal([]byte(rc.RequestDraft.Body), &result)
+	_ = json.Unmarshal([]byte(body), &result)
 	return result, nil
 }
 
-func (rc *ReqCmd) parseJSONBody() (map[string]any, error) {
+func (rc *ReqCmd) parseJSONBody(body string) (map[string]any, error) {
 	result := make(map[string]any)
-	if err := json.Unmarshal([]byte(rc.RequestDraft.Body), &result); err != nil {
+	if err := json.Unmarshal([]byte(body), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON body: %w", err)
 	}
 	return result, nil
 }
 
-func (rc *ReqCmd) parseXMLBody() (map[string]any, error) {
+func (rc *ReqCmd) parseXMLBody(body string) (map[string]any, error) {
 	result := make(map[string]any)
 	decoder := xml.NewDecoder(strings.NewReader(rc.RequestDraft.Body))
 
@@ -482,11 +507,11 @@ func (rc *ReqCmd) parseXMLBody() (map[string]any, error) {
 	return result, nil
 }
 
-func (rc *ReqCmd) parseTextBody() (map[string]any, error) {
+func (rc *ReqCmd) parseTextBody(body string) (map[string]any, error) {
 	result := make(map[string]any)
-	if len(rc.ReqPropsSchema.Body) == 1 {
+	if len(body) == 1 {
 		for key := range rc.ReqPropsSchema.Body {
-			result[key] = rc.RequestDraft.Body
+			result[key] = body
 			break
 		}
 	}
@@ -506,6 +531,11 @@ func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 	finalURL := draft.Url
 	for key, value := range cmdParams.URL {
 		finalURL = strings.Replace(finalURL, ":"+key, value, 1)
+	}
+
+	finalURL, err := rc.substituteVars(finalURL)
+	if err != nil {
+		return nil, fmt.Errorf("variable substitution failed for url: %s", err.Error())
 	}
 	u, err := url.Parse(finalURL)
 	if err != nil {

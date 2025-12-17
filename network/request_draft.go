@@ -31,6 +31,7 @@ type RequestDraft struct {
 	Url         string            `json:"url"         toml:"url"`
 	Method      HTTPMethod        `json:"method"      toml:"method"`
 	Headers     map[string]string `json:"headers"     toml:"headers"`
+	Cookies     map[string]string `json:"cookies"     toml:"cookies"`
 	QueryParams map[string]string `json:"queryParams" toml:"query_params"` // Different casing for TOML standard
 	Body        string            `json:"body"        toml:"body"`
 }
@@ -93,6 +94,17 @@ func (rd *RequestDraft) SetHeader(key, val string) *RequestDraft {
 	return rd
 }
 
+func (rd *RequestDraft) SetCookie(key, val string) *RequestDraft {
+	if rd.Cookies == nil {
+		rd.Cookies = make(map[string]string)
+	}
+
+	key, val = strings.TrimSpace(key), strings.TrimSpace(val)
+
+	rd.Cookies[key] = val
+	return rd
+}
+
 func (rd *RequestDraft) SetQueryParam(key, val string) *RequestDraft {
 	if rd.QueryParams == nil {
 		rd.QueryParams = make(map[string]string)
@@ -139,6 +151,23 @@ func (rd *RequestDraft) getExpandedKeyVals(input map[string]string) (map[string]
 	}
 
 	return expandedKeyVals, nil
+}
+
+func (rd *RequestDraft) applyCookies(req *http.Request) {
+	if len(rd.Cookies) == 0 {
+		return
+	}
+
+	for name, value := range rd.Cookies {
+		if name == "" {
+			continue
+		}
+
+		req.AddCookie(&http.Cookie{
+			Name:  name,
+			Value: value,
+		})
+	}
 }
 
 func (d *RequestDraft) IterateQueryParams(handler FuncQueryParamHandler) {
@@ -190,6 +219,7 @@ func (rd *RequestDraft) Finalize() (*http.Request, error) {
 		req.ContentLength = int64(len(parsedBody))
 	}
 
+	rd.applyCookies(req)
 	return req, nil
 }
 
