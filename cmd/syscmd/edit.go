@@ -1,11 +1,11 @@
 package syscmd
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/shubm-quodes/repl-reqs/cmd"
@@ -119,21 +119,20 @@ func (er *CmdEditRespBody) OpenEditor(req *network.TrackerRequest) error {
 		)
 	}
 
-	var respBody any
-	if strings.ToLower(contentType[0]) == "application/json" {
-		if err = json.Unmarshal(respBytes, &respBody); err != nil {
-			log.Debug("failed to unmarshal json response %w", err)
-			return errors.New("failed to unmarshal json response")
-		}
-		return util.EditJSON(&respBody, config.GetAppCfg().GetDefaultEditor())
+	var edited []byte
+	if strings.Contains(strings.ToLower(contentType[0]), "application/json") {
+		edited, err = util.EditJsonRawWf(config.GetAppCfg().GetDefaultEditor(), respBytes)
+	} else if strings.Contains(strings.ToLower(contentType[0]), "xml") {
+		edited, err = util.EditXMLRawWf(config.GetAppCfg().GetDefaultEditor(), respBytes)
+	} else {
+		edited, err = util.EditTextRawWf(config.GetAppCfg().GetDefaultEditor(), respBytes)
 	}
 
-	if err = xml.Unmarshal(respBytes, &respBody); err != nil {
-		log.Debug("failed to unmarshal xml response %w,", err)
-		return errors.New("failed to unmarshal xml response")
+	if err != nil {
+		return err
 	}
-
-	return util.EditXML(&respBody, config.GetAppCfg().GetDefaultEditor())
+	req.ResponseBody = io.NopCloser(bytes.NewReader(edited))
+	return nil
 }
 
 func (ej *CmdEditJSON) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {

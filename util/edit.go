@@ -192,6 +192,21 @@ func EditXML(data any, editor string) error {
 	return EditorWorkflow(cfg)
 }
 
+func EditTextRawWf(editor string, data any) ([]byte, error) {
+	var rawBytes []byte
+	cfg := &EditorConfig{
+		TargetDataStructure: data,
+		FileName:            "reql-reqs.payload.txt",
+		Editor:              editor,
+		Encoder:             RawEncoder, // Use RawEncoder to avoid "null" or quotes
+		Decoder:             RawDecoder, // No-op decoder
+		RawBytesAp:          &rawBytes,
+	}
+
+	err := EditorWorkflow(cfg)
+	return rawBytes, err
+}
+
 // The json will not be decoded into a target ds, instead raw bytes will be returned.
 func EditJsonRawWf(editor string, data any) ([]byte, error) {
 	var rawBytes []byte
@@ -261,8 +276,12 @@ func RawEncoder(w io.Writer, data any) error {
 
 		for {
 			token, err := decoder.Token()
-			if err == io.EOF { break }
-			if err != nil { break } // Fallback handled below
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				break
+			} // Fallback handled below
 			encoder.EncodeToken(token)
 		}
 		encoder.Flush()
