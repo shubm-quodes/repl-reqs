@@ -38,23 +38,23 @@ func (cp *CmdPoll) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 		t.Fail(err)
 	}
 
-	err = cp.Poll(req, condition)
+	response, err := cp.Poll(req, condition)
 	if err != nil {
 		t.Fail(err)
 	} else {
-		t.CompleteWithMessage("Polling complete", nil)
+		t.AppendOutput(getFormattedResp(response) + "\n" + response.Status)
+		t.CompleteWithMessage("Polling complete", response)
 	}
 }
 
-func (cp *CmdPoll) Poll(req *http.Request, condition string) error {
+func (cp *CmdPoll) Poll(req *http.Request, condition string) (*http.Response, error) {
 	c, err := network.NewCondition(condition)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	p := network.NewPoller(req, c)
-	_, err = p.Poll() // Hmmm.. can the response be of any use in case of polling API calls?
-	return err
+	return p.Poll()
 }
 
 func (cp *CmdPoll) determinePollReqDraft(

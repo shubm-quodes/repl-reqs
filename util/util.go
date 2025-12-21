@@ -428,6 +428,7 @@ func ReadAndResetIoCloser(ioCloser *io.ReadCloser) ([]byte, error) {
 	}
 
 	data, err := io.ReadAll(*ioCloser)
+	(*ioCloser).Close()
 	if err != nil {
 		return nil, err
 	}

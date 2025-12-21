@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -109,11 +108,10 @@ func (c *BodyCondition) evaluate(body any) bool {
 func (c *BodyCondition) getUnmarshalledBody(resp *http.Response) (any, error) {
 	cType := resp.Header.Get("Content-Type")
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := util.ReadAndResetIoCloser(&resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-	defer resp.Body.Close()
 
 	var body any
 

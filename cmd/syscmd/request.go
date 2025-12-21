@@ -751,15 +751,7 @@ func (rc *ReqCmd) readAndUnmarshalResponse(resp *http.Response, target map[strin
 }
 
 func (rc *ReqCmd) handleSuccessfulResponse(task cmd.TaskUpdater, result network.Update) {
-	respMap := make(map[string]any)
-
-	err := rc.readAndUnmarshalResponse(result.Resp(), respMap)
-	if err != nil {
-		task.Fail(errors.New(err.Error() + "\n\n" + result.Resp().Status))
-		return
-	}
-
-	task.AppendOutput(getFromattedResp(respMap) + "\n" + result.Resp().Status)
+	task.AppendOutput(getFormattedResp(result.Resp()) + "\n" + result.Resp().Status)
 	task.Complete(result.Resp())
 }
 
@@ -788,16 +780,59 @@ func highlightText(input string, lexer chroma.Lexer) string {
 	return buf.String()
 }
 
-func getFromattedResp(resp map[string]any) string {
-	var jsonBuffer bytes.Buffer
-	enc := json.NewEncoder(&jsonBuffer)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	enc.Encode(resp)
+func getFormattedResp(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
 
-	lexer := lexers.Get("json")
-	respStr := jsonBuffer.String()
-	return highlightText(respStr, lexer)
+	bodyBytes, err := util.ReadAndResetIoCloser(&resp.Body)
+	if err != nil {
+		return fmt.Sprintf("Error reading body: %v", err)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	var formatted bytes.Buffer
+	var lexer chroma.Lexer
+
+	if strings.Contains(contentType, "json") {
+		if err := json.Indent(&formatted, bodyBytes, "", "  "); err == nil {
+			lexer = lexers.Get("json")
+		}
+	} else if strings.Contains(contentType, "xml") {
+		if indented, err := formatXML(bodyBytes); err == nil {
+			formatted.Write(indented)
+			lexer = lexers.Get("xml")
+		}
+	}
+
+	// If formatting failed or format is unknown, print raw
+	if formatted.Len() == 0 {
+		return string(bodyBytes)
+	}
+
+	return highlightText(formatted.String(), lexer)
+}
+
+func formatXML(data []byte) ([]byte, error) {
+	var b bytes.Buffer
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	encoder := xml.NewEncoder(&b)
+	encoder.Indent("", "  ")
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = encoder.EncodeToken(token)
+		if err != nil {
+			return nil, err
+		}
+	}
+	encoder.Flush()
+	return b.Bytes(), nil
 }
 
 func (rc *ReqCmd) PopulateSchemasFromDraft() {
