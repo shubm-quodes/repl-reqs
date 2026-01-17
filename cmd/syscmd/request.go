@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -27,6 +28,8 @@ import (
 const (
 	ActionCycleReq = "cycle_requests"
 )
+
+var RegexUrlParam = regexp.MustCompile(`:([a-zA-Z0-9]+)`)
 
 type ReqMgrAware interface {
 	SetReqMgr(mgr *network.RequestManager)
@@ -835,9 +838,9 @@ func formatXML(data []byte) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func (rc *ReqCmd) PopulateSchemasFromDraft() {
+func (rc *ReqCmd) PopulateSchemasFromDraft() error {
 	if rc.RequestDraft == nil {
-		return
+		return errors.New("failed to populate request draft schema: nothing's been drafted")
 	}
 
 	if rc.ReqPropsSchema == nil {
@@ -849,10 +852,32 @@ func (rc *ReqCmd) PopulateSchemasFromDraft() {
 	}
 
 	rc.populateQuerySchemaFromDraft()
+	err := rc.populateUrlSchemaFromDraft()
+	if err != nil {
+		return err
+	}
 	rc.ReqPropsSchema.Body = populateSchemaFromJSONString(rc.GetBody())
+	return nil
 }
 
 func (rc *ReqCmd) cleanup() {}
+
+func (rc *ReqCmd) populateUrlSchemaFromDraft() error {
+	u, err := url.Parse(rc.RequestDraft.Url)
+	if err != nil {
+		log.Debug("failed to parse url %w", err)
+		return errors.New("failed to parse url")
+	}
+
+	params := RegexUrlParam.FindAllStringSubmatch(u.Path, -1)
+	schema := rc.ReqPropsSchema
+	schema.UrlParams = make(ValidationSchema)
+
+	for _, p := range params {
+		schema.UrlParams[p[1]] = &StrValidations{Type: "string"}
+	}
+	return nil
+}
 
 func (rc *ReqCmd) populateQuerySchemaFromDraft() {
 	schema := rc.ReqPropsSchema
