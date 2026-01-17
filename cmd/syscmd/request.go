@@ -531,15 +531,15 @@ func (rc *ReqCmd) getContentType() string {
 
 func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 	draft := rc.RequestDraft
-	finalURL := draft.Url
+	r, err := draft.Finalize()
+	if err != nil {
+		return nil, err
+	}
+	finalURL := r.URL.String()
 	for key, value := range cmdParams.URL {
 		finalURL = strings.Replace(finalURL, ":"+key, value, 1)
 	}
 
-	finalURL, err := rc.substituteVars(finalURL)
-	if err != nil {
-		return nil, fmt.Errorf("variable substitution failed for url: %s", err.Error())
-	}
 	u, err := url.Parse(finalURL)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing URL: %w", err)
@@ -547,7 +547,7 @@ func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 
 	q := u.Query()
 	for key, value := range cmdParams.Query {
-		q.Add(key, value)
+		q.Set(key, value)
 	}
 	u.RawQuery = q.Encode()
 
@@ -561,6 +561,10 @@ func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 	}
 
 	req, err := http.NewRequest(string(draft.Method), u.String(), reqBody)
+	for _, c := range r.Cookies() {
+		req.AddCookie(c)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("error creating HTTP request: %w", err)
 	}
@@ -1035,6 +1039,7 @@ func resolveAndUpdateCommand(
 ) (*ReqCmd, error) {
 	handler := newReqCmd.GetCmdHandler()
 	existingCmd, unusedTokens := handler.ResolveCommandFromRoot(commandPath)
+	newReqCmd.Mgr = reqMgr
 
 	if existingCmd == nil {
 		newReqCmd.PopulateSchemasFromDraft()
