@@ -107,7 +107,6 @@ type ReplCmdHandler struct {
 	taskUpdates           chan TaskStatus
 	tasks                 map[string]*Task
 	spinner               *spinner.Spinner
-	tty                   *os.File
 	currFgTaskId          string
 	lastBgTaskId          string
 	fgTaskIdChan          chan string

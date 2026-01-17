@@ -99,7 +99,7 @@ func (ch *CmdHeader) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 		return ctx, errors.New("please provide header [key] [val]")
 	}
 
-	key, val := tokens[0], tokens[1]
+	key, val := tokens[0], strings.Join(tokens[1:], " ")
 	reqDraft := ch.Mgr.PeakRequestDraft(cmdCtx.ID())
 
 	if reqDraft == nil {
@@ -119,7 +119,7 @@ func (ch *CmdCookie) Execute(cmdCtx *cmd.CmdCtx) (context.Context, error) {
 		return ctx, errors.New("please provide cookie [key] [val]")
 	}
 
-	key, val := tokens[0], tokens[1]
+	key, val := tokens[0], strings.Join(tokens[1:], " ")
 	reqDraft := ch.Mgr.PeakRequestDraft(cmdCtx.ID())
 
 	if reqDraft == nil {
