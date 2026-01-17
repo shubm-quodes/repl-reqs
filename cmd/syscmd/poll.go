@@ -31,11 +31,13 @@ func (cp *CmdPoll) ExecuteAsync(cmdCtx *cmd.CmdCtx) {
 	t := cmdCtx.Task
 	if err != nil {
 		t.Fail(err)
+		return
 	}
 
 	req, err := rd.Finalize()
 	if err != nil {
 		t.Fail(err)
+		return
 	}
 
 	response, err := cp.Poll(req, condition)
