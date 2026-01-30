@@ -565,6 +565,8 @@ func (rc *ReqCmd) buildRequest(cmdParams *CmdParams) (*http.Request, error) {
 		req.AddCookie(c)
 	}
 
+	req.Header = r.Header.Clone()
+
 	if err != nil {
 		return nil, fmt.Errorf("error creating HTTP request: %w", err)
 	}

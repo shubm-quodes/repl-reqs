@@ -52,8 +52,6 @@ func NewShellCfg(cfg *AppCfg) *readline.Config {
 			switch r {
 			case readline.CharCtrlZ:
 				return r, false
-			case readline.CharCtrlH:
-				return r, false
 			}
 			return r, true
 		},
